@@ -93,3 +93,17 @@ Use `sd plan` when work is large or ambiguous enough that an LLM benefits from s
 2. File issues for remaining work: `sd create --title "..."`
 3. Sync and push: `sd sync && git push`
 <!-- seeds:end -->
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in **seeds (`sd`)** — a git-native CLI tracker (`.seeds/`); GitHub holds only the code. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Five canonical roles, label = role (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`), applied via `sd`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
