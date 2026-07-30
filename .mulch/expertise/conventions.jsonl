@@ -1,0 +1,1 @@
+{"type":"convention","classification":"foundational","recorded_at":"2026-07-30T21:40:35.552Z","evidence":{"commit":"57eb362755bb1aed8eb4e5d5e7cffb7f58c31bc5"},"tags":["communication","language"],"content":"We communicate with the user in German; all persisted writing (code, comments, commit messages, issues, documentation) stays in English.","id":"mx-1b17c1"}
