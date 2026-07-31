@@ -1,0 +1,211 @@
+# Foundations Review — dagmar (2026-07-31, scope: `schaue`)
+
+Scope: `CONTEXT.md`, `docs/adr/0001-0006`, `docs/agents/*`, cross-checked against
+`sd list` / closed seeds. This run re-reviews the **evolved** doc set (the project
+adopted the first `foundations` review wholesale — see the resolution table at the
+end). Tags: `[FIX]` internal contradiction (fix now) · `[GAP]` referenced but not yet
+defined/decided · `[HOUSE]` documentation structure.
+
+---
+
+## A. Inconsistencies / contradictions
+
+### A1. `FIX` — ProjectManifest path/format: CONTEXT.md contradicts ADR-0003 (and a closed seed)
+**Locations:** `CONTEXT.md` → Tier C *ProjectManifest* vs `docs/adr/0003` → Decision;
+seed `dagmar-8097` (closed).
+
+- ADR-0003 Decision **pins** the path/format: *".dagmar/project.yaml (YAML…)"* and
+  explicitly removes the CR field: *"The Project CR has no checkable-source field."*
+- `CONTEXT.md` *ProjectManifest* still says: *"Concrete path/format and the
+  checkable-source projection are **not yet pinned** — tracked as ProjectManifest spec
+  v0, seeds `dagmar-8097`."*
+- That seed (`dagmar-8097`) is **closed** (closed 2026-07-31T11:56) — i.e. the work is
+  done. So the CONTEXT.md note is doubly stale: the path *is* pinned and the tracking
+  seed is resolved.
+
+→ Update the `CONTEXT.md` *ProjectManifest* bullet to match ADR-0003
+(`.dagmar/project.yaml`; checkables live in the manifest; no CR `checkable-source`).
+
+### A2. `FIX` — ADR-0003 Context still names "prompt-enrichment JSON" (stale vs ADR-0005)
+**Location:** `docs/adr/0003` → Context (first paragraph).
+
+ADR-0003 Context lists project-specific entities as *"its own checkables …, its os-eco
+stores (seeds/mulch/canopy), **and its prompt-enrichment JSON**."* But ADR-0005
+relocated prompts into canopy stores, and ADR-0003's own Decision says *"Prompts
+themselves live in the project's `.canopy/` store … the manifest only points at it."*
+The "prompt-enrichment JSON" concept no longer exists.
+
+→ Drop "prompt-enrichment JSON" from ADR-0003 Context (or replace with "`.canopy/`
+store path", matching the Decision). *(Note: ADRs are normally immutable; since this is
+the Context recap rather than the decision, a one-line correction is appropriate.)*
+
+### A3. `FIX` — CONTEXT.md Tier B "Prompts (→ canopy)" bullet contradicts ADR-0005
+**Location:** `CONTEXT.md` → Tier B *Prompts*.
+
+The bullet still reads: *"compose a prompt from a **Prompt spec** (base sources +
+**project-JSON enrichment**)."* ADR-0005 refutes both halves — the Prompt is **not a
+spec** (*"a reference to canopy prompts, not a dagmar-invented spec"*) and composition
+is a **dagmar-side cross-store merge** of two canopy stores, not "project-JSON
+enrichment".
+
+→ Rewrite the Tier B *Prompts* bullet to describe the ADR-0005 cross-store merge
+(dagmar operational mixins ⊕ project-content prompts, resolved by dagmar).
+
+---
+
+## B. Undefined / under-defined terms
+
+(Largely resolved by ADR-0004/0005/0006; one self-containedness gap remains.)
+
+### B1. `HOUSE` — Autonomy axis *values* are in ADR-0006 only, not the glossary
+**Location:** `CONTEXT.md` → Project (autonomy setting), Key relationships (gating).
+
+CONTEXT.md names the axes (`{merge-authority, trigger-tier}`) but never their value
+sets. ADR-0006 defines them: `merge-authority ∈ {human, auto}`,
+`trigger-tier ∈ {on-demand, reactive, proactive}`. A reader of CONTEXT.md alone cannot
+tell what `authority==auto` ranges over.
+
+→ Optional: add the value sets to the Project glossary entry or the gating-flow line so
+the vocabulary is self-contained (ADR-0006 stays authoritative for rationale).
+
+---
+
+## C. Referenced-but-missing ADRs
+
+**None.** All ADRs cited in `CONTEXT.md` (0001–0006) now exist as files in
+`docs/adr/`. The highest-priority gap from the first review (Hybrid-C had no ADR) is
+closed by ADR-0004. This section is clean.
+
+---
+
+## D. Documentation structure / housekeeping
+
+### D1. `HOUSE` — ADR-0002 still doesn't cross-reference ADR-0004
+**Location:** `docs/adr/0002` → Context.
+
+ADR-0002 opens with *"execution model Hybrid-C…"* but, now that ADR-0004 exists, still
+doesn't link it. Add "(see ADR-0004)" so the topology decision is one hop away.
+
+### D2. `GAP` — ADR-0004 cites "the closed research" that is not in the repo
+**Location:** `docs/adr/0004` → Decision.
+
+ADR-0004 asserts concrete Dagger-in-K8s conclusions — *"engine deployed as a Helm
+DaemonSet; agent pods via `_EXPERIMENTAL_DAGGER_RUNNER_HOST=kube-pod://`; 3-layer cache
+with optional S3/GCS backend"* — attributed to *"the closed research."* But
+`docs/research/` contains only `canopy-prompt-model.md`; none of those terms
+(DaemonSet / kube-pod / runner-host / 3-layer cache / S3/GCS) appear anywhere else under
+`docs/`.
+
+→ Either link the research artifact (seed? external doc?) or inline its conclusion +
+provenance into ADR-0004, so the topology claims are traceable.
+
+### D3. `HOUSE` — CONTEXT.md gating flow covers only the pre-merge `auto` path
+**Location:** `CONTEXT.md` → Key relationships *Gating flow*; vs ADR-0006 *trigger-tier*.
+
+The gating-flow line describes only `merge ⟺ both green ∧ authority==auto`. But
+ADR-0006's `reactive` tier defines a **post-merge** flow: human merges (authority=human),
+then a reactive post-merge gate review opens a fix PR. That second path is invisible in
+CONTEXT.md.
+
+→ Add a one-line note that with `authority=human` the gate runs **post-merge**
+(reactive fix-PR), so the gating flow is authority-dependent.
+
+### D4. `HOUSE` — Terminal outcomes on gate↔reviewer disagreement are unclear while Calibration is deferred
+**Location:** `CONTEXT.md` → Gating flow (`{revise | escalate}`); ADR-0006 *Calibration
+Agent (deferred)*.
+
+The earlier `reject` outcome disappeared; CONTEXT.md now lists only `{revise | escalate}`.
+The Calibration Agent (the disagreement diagnostician) is deferred, and its proposals
+are operator-approved initially. So the *immediate* terminal behavior when QualityGate
+and ReviewAgent disagree (before any operator-approved calibration) is not crisply
+stated — does every disagreement escalate to a human? 
+
+→ Clarify the terminal-state matrix (esp. the disagreement case) in CONTEXT.md or
+defer explicitly to ADR-0006 + `dagmar-e95b`.
+
+### D5. `HOUSE` — ADR-0001 uses stale "Prompt spec" term (low priority)
+**Location:** `docs/adr/0001` → Alternatives ("Prompt spec → canopy composition").
+
+ADR-0005 explicitly notes it *"refines the earlier D6 framing"* and that the Prompt is
+**not** a spec. ADR-0001's wording is now historical. Acceptable as an immutable record;
+flagged only for awareness. No action required unless ADR-0001 is ever amended.
+
+---
+
+## E. Implementation maturity (context, not a defect)
+
+- `go.mod` is still a stub; **no application Go source** yet (only a
+  `.claude/skills/...` helper). Expected at this stage.
+- `README.md` now exists (932 B) — resolves the first review's D1.
+- **The review loop is visibly closing**: the first `foundations` review's top gaps
+  produced ADR-0004/0005/0006 and closed seeds `dagmar-4271`, `dagmar-8097`,
+  `dagmar-fa45`. See the resolution table below.
+
+---
+
+## Resolution status of the first review (`2026-07-31-foundations-review.md`)
+
+| First-review item | Status now | Where |
+|-------------------|------------|-------|
+| A1 quartet cardinality contradiction | ✅ fixed | CONTEXT.md Key relationships rewritten correctly |
+| A2 Engine cardinality undefined | ✅ tracked open | ADR-0004 sub-Q → seed `dagmar-cbb8`; Engine glossary notes it |
+| B1 three "autonomy" concepts | ✅ resolved | ADR-0006 (two slim axes; Project owns them; Agent has none) |
+| B2 Wayfinder undefined | ✅ resolved | "External concepts" entry added to CONTEXT.md |
+| B3 ProjectManifest path/format | ⚠️ partly regressed | Pinned in ADR-0003, but CONTEXT.md glossary stale → **A1 above** |
+| B4 checkable-source vs manifest | ✅ resolved | Project CR has no `checkable-source`; manifest owns checkables |
+| B5 Prompt pipeline shapes | ✅ resolved | ADR-0005 + `docs/research/canopy-prompt-model.md` |
+| C1 Hybrid-C no ADR | ✅ resolved | ADR-0004 |
+| C2 Credentials & secrets | ✅ tracked open | seed `dagmar-4c9f` + CONTEXT.md "Open questions" |
+| C3 Autonomy/QualityGate policy | ✅ resolved | ADR-0006 (policy) + `dagmar-e95b` (workflow) |
+| C4 Concurrency/scheduling | ✅ tracked open | ADR-0004 sub-Q → seed `dagmar-cbb8` |
+| D1 no README | ✅ resolved | `README.md` exists |
+| D2 duplicated CRD table | ✅ resolved | CONTEXT.md now one-liner + pointer to ADR-0002 |
+| D3 `Agent 1:N Runs` missing | ✅ resolved | now in Key relationships |
+| D4 CRD→Loop bridge undocumented | ✅ resolved | dedicated section + table in CONTEXT.md |
+| D5 two label taxonomies | — unchanged | minor; not re-flagged |
+| D6 two paths to seeds | ✅ resolved | "Two paths to seeds" bullet in Key relationships |
+
+**Net: 15/16 resolved; B3 partly regressed into A1.**
+
+---
+
+## Suggested next ADRs (priority order)
+
+No urgent missing ADRs remain. The next ADRs will derive from the **open** seeds:
+
+1. **Credentials & secret management** (seed `dagmar-4c9f`, High) → likely ADR-0007.
+2. **Engine tenancy & Run concurrency** (seed `dagmar-cbb8`, Medium; open sub-Q of
+   ADR-0004) → likely ADR-0008, refining ADR-0004's deferred sub-questions.
+
+Before those, clear the doc-consistency debt surfaced here (**A1–A3**, **D2**).
+
+---
+
+## Already tracked in seeds
+
+| Topic | Seed | Status |
+|-------|------|--------|
+| Wayfinder map (overall) | `dagmar-80dd` | open (epic) |
+| Quality gate & multi-agent review workflow | `dagmar-e95b` | open |
+| Go module layout & hexagonal architecture | `dagmar-3684` | open |
+| Self-bootstrap & dogfooding trajectory | `dagmar-e795` | open |
+| Credentials & secret management | `dagmar-4c9f` | open (High) |
+| Engine tenancy & Run concurrency | `dagmar-cbb8` | open |
+| Domain model & ubiquitous language | `dagmar-4271` | closed |
+| ProjectManifest spec v0 | `dagmar-8097` | closed |
+| Autonomy model | `dagmar-fa45` | closed |
+
+## Newly surfaced this run (not yet tracked)
+
+- **A1** — CONTEXT.md ↔ ADR-0003 path/format contradiction + stale `dagmar-8097` pointer.
+- **A2** — ADR-0003 Context "prompt-enrichment JSON" stale vs ADR-0005.
+- **A3** — CONTEXT.md Tier B *Prompts* bullet stale vs ADR-0005.
+- **B1** — autonomy axis value sets missing from the glossary (low priority).
+- **D1** — ADR-0002 missing cross-ref to ADR-0004.
+- **D2** — ADR-0004 cites absent "closed research" (Dagger-in-K8s).
+- **D3** — CONTEXT.md gating flow omits the human/post-merge path.
+- **D4** — terminal outcomes on gate↔reviewer disagreement unclear while Calibration deferred.
+- **D5** — ADR-0001 stale "Prompt spec" (historical; low priority).
+
+Highest-value to action now: **A1, A2, A3** (three stale-doc contradictions, all
+quick fixes) and **D2** (untraceable research citation).
