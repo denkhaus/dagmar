@@ -11,6 +11,22 @@ Perform a repeatable design-doc review of this project's architecture foundation
 
 Scope label for the output filename: `${1:-foundations}`
 
+## Role boundary — review only, never plan
+
+This command **reviews only**: it observes, documents findings, and writes a report. It
+does **not** plan, prioritize, decide, fix, or file work. Concretely:
+
+- Do **not** create / update / close seeds (`sd create|update|close`) — not even to file
+  your own findings.
+- Do **not** propose a prioritized action plan, a roadmap, or "next steps to do".
+- Do **not** offer to file findings as seeds or to implement fixes.
+- Observations about missing/referenced ADRs stay **descriptive** (what is undecided or
+  absent), never a prioritized recommendation.
+
+**Planning, prioritization, seed-filing, and fixes are owned by a separate planning
+agent.** This command's sole deliverable is the report file — it is the hand-off input
+to that planning agent. Stop after writing the report + the short German summary.
+
 ## Steps
 
 1. **Prime context.** Note the current date from the system context; it is used in the
@@ -63,8 +79,12 @@ Use the **same structure** as `docs/review/2026-07-31-foundations-review.md`:
 - **C. Referenced-but-missing ADRs**
 - **D. Documentation structure / housekeeping**
 - **E. Implementation maturity** (optional context, not a defect)
-- **Suggested next ADRs** (priority order)
-- **Already tracked in seeds** (table) + a "newly surfaced" list
+- **Open items for planning** — **descriptive only**: list what is undecided or absent
+  (e.g. "credentials ADR missing", "concurrency model undecided"). **No priority order,
+  no recommendations, no roadmap.** This replaces the older "Suggested next ADRs"
+  section and is the hand-off input for the planning agent.
+- **Already tracked in seeds** (table) + a "newly surfaced" list (observations only —
+  these are **not** filed as seeds by this command).
 
 Persisted writing (the report file) is **English**. Cite findings as
 `file → section` or `file L##`. Be precise and specific; no generic advice.
@@ -72,5 +92,7 @@ Persisted writing (the report file) is **English**. Cite findings as
 ## Reply to the user
 
 Reply **in German** (project convention: spoken language German, persisted writing
-English). Keep it under ~200 words: file path, the 3–5 most important findings as a
-short bulleted summary, and offer to file the highest-value new findings as seeds.
+English). Keep it under ~200 words: file path + a short bulleted summary of the 3–5
+most important findings. **Do not offer to file seeds, plan, or fix** — state that the
+report is ready as input for the planning agent, then stop. This command takes no
+action beyond writing the report.
