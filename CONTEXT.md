@@ -68,9 +68,11 @@ dogfooding).
   credentials, autonomy level) and references the repo's ProjectManifest.
 - **Agent** (CRD) — a durable role/persona (coder, reviewer, researcher, …): model +
   Prompt ref + tool-set + checkable + autonomy scope. Materialized as Runs.
-- **Prompt** (CRD) — a composition **spec** (not text): base canopy sources +
-  project-JSON enrichment binding. canopy resolves it per-Project at run time into the
-  final prompt passed to `dag.LLM().WithPromptFile(...)`.
+- **Prompt** (CRD) — a **reference to canopy prompts**, not a dagmar-invented spec: a
+  project-content prompt (in the project's `.canopy/`) plus dagmar operational mixins
+  (output-format / review-gating / safety / tool-rules, in dagmar's own canopy). dagmar
+  composes them at run time (Variant A, ADR-0005) into the final prompt passed to
+  `dag.LLM().WithPromptFile(...)`.
 - **QualityGate** (CRD) — the policy deciding whether a candidate change may advance.
   Composes: checkables (mechanical) + ReviewAgent review (cognitive) + autonomy/merge
   rules. Per-Project / autonomy-level; codebase-evolving.
@@ -95,10 +97,12 @@ dogfooding).
 **In-repo manifest (not a CRD):**
 
 - **ProjectManifest** — the in-repo conformance contract each Project exposes:
-  project-specific `checkables` + os-eco binding + prompt-enrichment JSON + repo/flow
-  metadata. Git-native, versioned with the code; the Project CR references it. Grows
-  via dogfooding. _(Concrete path/format and the `checkable-source` projection are not
-  yet pinned — tracked as ProjectManifest spec v0.)_
+  project-specific `checkables` + os-eco binding (seeds/mulch/**canopy** store paths) +
+  repo/flow metadata. Prompts are NOT declared here — they live in the project's own
+  `.canopy/` store (see ADR-0005). Git-native, versioned with the code; the Project CR
+  references it. Grows via dogfooding. _(Concrete path/format and the
+  `checkable-source` projection are not yet pinned — tracked as ProjectManifest spec v0,
+  seeds `dagmar-8097`.)_
 
 **Roles (Agent specializations, not separate types):**
 
@@ -155,14 +159,12 @@ seeds `dagmar-3684`, Go module layout & hex arch):
 ## Open questions (tracked, not yet decided)
 
 - **Autonomy model** — discrete levels + which entity (Project / Agent / QualityGate) is
-  authoritative and precedence on conflict. _(ADR pending; overlaps `dagmar-e95b`.)_
+  authoritative and precedence on conflict. _(seeds `dagmar-fa45`; overlaps `dagmar-e95b`.)_
 - **Credentials & secrets** — storage, per-Project scoping, injection into Sandbox /
-  `dag.Env()`. _(ADR pending.)_
+  `dag.Env()`. _(seeds `dagmar-4c9f`.)_
 - **Engine tenancy & Run concurrency** — singleton vs per-Project Engine; Sandbox
   isolation/quotas; concurrent Runs on one Task; who sequences Workspace lineage.
-  _(Open sub-questions of ADR-0004.)_
-- **Prompt pipeline data shapes** — Prompt spec / enrichment JSON / resolved prompt.
-  _(Deferred to prompt/quality-gate work.)_
+  _(Open sub-questions of ADR-0004; seeds `dagmar-cbb8`.)_
 
 ## Architectural decisions
 
@@ -172,3 +174,4 @@ See `docs/adr/`:
 - **ADR-0002** — Kubernetes CRD boundary
 - **ADR-0003** — Project conformance via in-repo ProjectManifest
 - **ADR-0004** — Execution topology (Hybrid-C)
+- **ADR-0005** — Prompt composition (dagmar-side cross-store merge, Variant A)

@@ -16,8 +16,9 @@ contract lives.
 
 **ProjectManifest** is an **in-repo** conformance contract: a well-known manifest
 (analogous to `.seeds/` / `.mulch/` / `.dagger/`) that each Project exposes, containing
-its project-specific `checkables`, os-eco binding, prompt-enrichment JSON, and
-repo/flow metadata. It is:
+its project-specific `checkables`, os-eco binding (incl. the project's `.canopy/` store
+path), and repo/flow metadata. (Prompts themselves live in the project's `.canopy/`
+store — see ADR-0005; the manifest only points at it.) It is:
 
 - **git-native**, versioned with the code it describes;
 - **referenced** by the `Project` CR (repo + path), which does **not** duplicate the
