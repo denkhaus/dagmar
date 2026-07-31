@@ -65,18 +65,23 @@ dogfooding).
 
 - **Project** (CRD) — a registered, repo-backed repository dagmar operates on (own
   repo or fork). Carries **dagmar-operational config only** (os-eco binding,
-  credentials, autonomy level) and references the repo's ProjectManifest.
+  credentials, and the **autonomy setting** `{merge-authority, trigger-tier}`,
+  ADR-0006) and references the repo's ProjectManifest.
   Project-specific content (incl. `checkables`) lives in the manifest, not on the CR.
 - **Agent** (CRD) — a durable role/persona (coder, reviewer, researcher, …): model +
-  Prompt ref + tool-set + checkable + autonomy scope. Materialized as Runs.
+  Prompt ref + tool-set + checkable + role bounds. Materialized as Runs. Agents have
+  **no merge authority** — merge is a deterministic controller function (ADR-0006); the
+  merge tool is in no Agent's tool-set.
 - **Prompt** (CRD) — a **reference to canopy prompts**, not a dagmar-invented spec: a
   project-content prompt (in the project's `.canopy/`) plus dagmar operational mixins
   (output-format / review-gating / safety / tool-rules, in dagmar's own canopy). dagmar
   composes them at run time (Variant A, ADR-0005) into the final prompt passed to
   `dag.LLM().WithPromptFile(...)`.
-- **QualityGate** (CRD) — the policy deciding whether a candidate change may advance.
-  Composes: checkables (mechanical) + ReviewAgent review (cognitive) + autonomy/merge
-  rules. Per-Project / autonomy-level; codebase-evolving.
+- **QualityGate** (CRD) — the **deterministic** layer deciding whether a candidate may
+  advance (checkables + rules). **Invariant** — always secures quality. Merge requires
+  QualityGate.green **AND** ReviewAgent.approve (two green lights, ADR-0006); the
+  ReviewAgent holds a hard veto. Per-Project; codebase-evolving (grows via the
+  Calibration Agent).
 - **Trigger** (CRD) — declarative event source that creates Tasks. Reactive (GitHub
   webhooks) or proactive (cron housekeeping). Bound to a Project + Agent /
   event-mapping.
@@ -107,8 +112,13 @@ dogfooding).
 
 **Roles (Agent specializations, not separate types):**
 
-- **ReviewAgent** — an Agent role that cognitively reviews another Run's output; the
-  cognitive layer of the QualityGate.
+- **ReviewAgent** — an Agent role that cognitively reviews another Run's output and
+  holds a **hard veto**; co-equal gate with the QualityGate (merge needs both green,
+  ADR-0006). Prompt = dagmar `review-agent` mixin ⊕ project `review-calibration` mixin
+  (ADR-0005).
+- **Calibration Agent** *(deferred)* — a non-gating LLM step that, on QualityGate ↔
+  ReviewAgent disagreement, diagnoses the cause and emits project-specific
+  `review-calibration` mixins into the project's canopy (ADR-0006).
 - **planner / architect** — an Agent role that decomposes work into seeds issues
   (future).
 
@@ -131,8 +141,9 @@ dogfooding).
   `Task 1:N Runs`, each `Run 1:1 Sandbox`, all under one Engine.
 - **Work hierarchy:** `Project 1:N Tasks`; `Task ≡ 1 seeds issue`; `Task 1:N Runs`.
 - **Workspace:** per-Task base ref; per-Run isolated clone with in/out lineage.
-- **Gating flow:** coder-Run → candidate → QualityGate (checkables + ReviewAgent) →
-  `{auto-merge | revise | escalate | reject}`.
+- **Gating flow:** coder-Run → candidate → **two green lights** (QualityGate ∧
+  ReviewAgent.approve) → `merge ⟺ both green ∧ authority==auto`; else `{revise |
+  escalate}`. Merge is a deterministic Dagger function, not an LLM action (ADR-0006).
 - **Trigger flow:** Trigger → seeds issue → Task → Run(s).
 - **os-eco:** per-Project ports; N+1 contexts.
 - **Two paths to seeds:** the controller observes seeds directly (scheduling/state);
@@ -159,8 +170,6 @@ seeds `dagmar-3684`, Go module layout & hex arch):
 
 ## Open questions (tracked, not yet decided)
 
-- **Autonomy model** — discrete levels + which entity (Project / Agent / QualityGate) is
-  authoritative and precedence on conflict. _(seeds `dagmar-fa45`; overlaps `dagmar-e95b`.)_
 - **Credentials & secrets** — storage, per-Project scoping, injection into Sandbox /
   `dag.Env()`. _(seeds `dagmar-4c9f`.)_
 - **Engine tenancy & Run concurrency** — singleton vs per-Project Engine; Sandbox
@@ -176,3 +185,4 @@ See `docs/adr/`:
 - **ADR-0003** — Project conformance via in-repo ProjectManifest
 - **ADR-0004** — Execution topology (Hybrid-C)
 - **ADR-0005** — Prompt composition (dagmar-side cross-store merge, Variant A)
+- **ADR-0006** — Autonomy model (slim axes, deterministic merge, two-green + veto)
