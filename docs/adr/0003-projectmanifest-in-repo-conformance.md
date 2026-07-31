@@ -25,6 +25,12 @@ store — see ADR-0005; the manifest only points at it.) It is:
   project-specific content (the CR may mirror fields read-only as status for
   observability);
 - **not a CRD** and **not declared on the Project CR**.
+- **path/format:** `.dagmar/project.yaml` (YAML; commentable, consistent with
+  `.mulch/mulch.config.yaml`); the Project CR references it by repo + path.
+- **`checkables` are required** project-specific content in the manifest (a
+  `checkables:` section: build/test/lint commands or a verify-script ref). A Project
+  without them is non-conforming — dagmar will not operate on it. The Project CR has no
+  `checkable-source` field; it reads checkables from the referenced manifest.
 
 The contract **grows via dogfooding**: dagmar (itself a Project) defines its own
 ProjectManifest first; each capability dagmar gains can extend the standard.

@@ -64,8 +64,9 @@ dogfooding).
 **CRDs (declarative: definitions / policy / registration / observable execution):**
 
 - **Project** (CRD) — a registered, repo-backed repository dagmar operates on (own
-  repo or fork). Carries dagmar-side config (checkable source, os-eco binding,
+  repo or fork). Carries **dagmar-operational config only** (os-eco binding,
   credentials, autonomy level) and references the repo's ProjectManifest.
+  Project-specific content (incl. `checkables`) lives in the manifest, not on the CR.
 - **Agent** (CRD) — a durable role/persona (coder, reviewer, researcher, …): model +
   Prompt ref + tool-set + checkable + autonomy scope. Materialized as Runs.
 - **Prompt** (CRD) — a **reference to canopy prompts**, not a dagmar-invented spec: a
