@@ -19,9 +19,10 @@ scheduling, triggers, proactive cron) **plus** agent pods that invoke an in-clus
 Dagger engine for hermetic code-changing actions and as the LLM/tool sandbox
 (`dag.LLM().Loop()` on a `CodeWorkspace`).
 
-Dagger-in-K8s per the closed research: engine deployed as a Helm DaemonSet; agent pods
-via `_EXPERIMENTAL_DAGGER_RUNNER_HOST=kube-pod://`; 3-layer cache with optional
-S3/GCS backend.
+Dagger-in-K8s per `docs/research/dagger-in-k8s.md` (full findings + sources): engine
+deployed as a Helm DaemonSet; agent pods via
+`_EXPERIMENTAL_DAGGER_RUNNER_HOST=kube-pod://`; 3-layer cache with optional S3/GCS
+backend.
 
 ## Alternatives considered
 

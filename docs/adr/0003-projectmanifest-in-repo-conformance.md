@@ -7,7 +7,7 @@
 ## Context
 
 Each Project has **project-specific** entities: its own `checkables` (build/test/lint),
-its os-eco stores (seeds/mulch/canopy), and its prompt-enrichment JSON. For dagmar to
+its os-eco stores (seeds/mulch/canopy, incl. prompts). For dagmar to
 operate uniformly on *any* project that follows the spec, these entities must be
 **standardized** behind a conformance contract. The open question is where that
 contract lives.

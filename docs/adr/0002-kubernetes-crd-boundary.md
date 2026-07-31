@@ -6,7 +6,7 @@
 
 ## Context
 
-dagmar is a Kubernetes control plane (execution model Hybrid-C: Go/K8s control plane +
+dagmar is a Kubernetes control plane (execution model Hybrid-C — see ADR-0004: Go/K8s control plane +
 agent pods; Dagger as the hermetic engine). A control plane implies a controller, so
 the question is not "CRDs yes/no" but **which entities are custom resources**. A single
 CRD is poor ROI for an operator; the decision is the coherent *set* and the boundary

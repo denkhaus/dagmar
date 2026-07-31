@@ -56,8 +56,9 @@ dogfooding).
   dependencies and plans. Canonical work handle.
 - **Memory** (→ mulch) — read/write project expertise (conventions, patterns,
   failures, decisions); per-Project recall.
-- **Prompts** (→ canopy) — compose a prompt from a Prompt spec (base sources +
-  project-JSON enrichment).
+- **Prompts** (→ canopy) — dagmar composes an Agent's prompt by cross-store merging
+  (ADR-0005): dagmar operational mixins (dagmar `.canopy/`) ⊕ project-content prompts
+  (project `.canopy/`); emits the resolved `.md` for `WithPromptFile`.
 
 ### Tier C — dagmar core
 
@@ -65,8 +66,9 @@ dogfooding).
 
 - **Project** (CRD) — a registered, repo-backed repository dagmar operates on (own
   repo or fork). Carries **dagmar-operational config only** (os-eco binding,
-  credentials, and the **autonomy setting** `{merge-authority, trigger-tier}`,
-  ADR-0006) and references the repo's ProjectManifest.
+  credentials, and the **autonomy setting** — `merge-authority` (human|auto),
+  `trigger-tier` (on-demand|reactive|proactive); ADR-0006 — and references the repo's
+  ProjectManifest.
   Project-specific content (incl. `checkables`) lives in the manifest, not on the CR.
 - **Agent** (CRD) — a durable role/persona (coder, reviewer, researcher, …): model +
   Prompt ref + tool-set + checkable + role bounds. Materialized as Runs. Agents have
@@ -106,9 +108,9 @@ dogfooding).
   project-specific `checkables` + os-eco binding (seeds/mulch/**canopy** store paths) +
   repo/flow metadata. Prompts are NOT declared here — they live in the project's own
   `.canopy/` store (see ADR-0005). Git-native, versioned with the code; the Project CR
-  references it. Grows via dogfooding. _(Concrete path/format and the
-  `checkable-source` projection are not yet pinned — tracked as ProjectManifest spec v0,
-  seeds `dagmar-8097`.)_
+  references it by repo + path. Path/format: `.dagmar/project.yaml` (YAML); the CR has
+  no `checkable-source` field — checkables live in the manifest (ADR-0003). Grows via
+  dogfooding.
 
 **Roles (Agent specializations, not separate types):**
 
@@ -144,6 +146,12 @@ dogfooding).
 - **Gating flow:** coder-Run → candidate → **two green lights** (QualityGate ∧
   ReviewAgent.approve) → `merge ⟺ both green ∧ authority==auto`; else `{revise |
   escalate}`. Merge is a deterministic Dagger function, not an LLM action (ADR-0006).
+  With `authority=human` the gate runs **post-merge** (reactive: human merges → gate
+  review → fix PR if broken).
+- **Disagreement (Gate ↔ Reviewer):** revise if the veto is actionable; else
+  **escalate** to a human. The deferred Calibration Agent (ADR-0006) will later
+  diagnose gate-gaps automatically; until then every unresolved disagreement
+  escalates.
 - **Trigger flow:** Trigger → seeds issue → Task → Run(s).
 - **os-eco:** per-Project ports; N+1 contexts.
 - **Two paths to seeds:** the controller observes seeds directly (scheduling/state);
