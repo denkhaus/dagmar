@@ -196,3 +196,4 @@ See `docs/adr/`:
 - **ADR-0006** — Autonomy model (slim axes, deterministic merge, two-green + veto)
 - **ADR-0007** — Credentials & secret management (per-Project namespace, typed secrets, ESO, projected injection)
 - **ADR-0008** — Engine tenancy & Run concurrency (singleton engine, kube-pod:// agent pods + RBAC, per-Project cache volumes)
+- **ADR-0009** — Quality-gate workflow family (deterministic Justfile gate, hermetic LLM via tool-set, gate-before-review, Calibration loop, post-merge watchdog)
