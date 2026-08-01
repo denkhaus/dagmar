@@ -2,6 +2,8 @@
 
 dagmar is a (target: fully-autonomous) Dagger/Kubernetes-hybrid multi-agent coding
 system, written in Go, that works on the owner's own repositories and their forks.
+Strategic destination (recorded in ADR-0009, tracked in seed `dagmar-1775`): a
+Dagger-based **software factory** organized around a Workflow concept.
 This document is the single source of truth for dagmar's domain vocabulary: every
 issue, design, and code symbol uses these terms as defined here.
 
@@ -111,8 +113,18 @@ dogfooding).
   repo/flow metadata. Prompts are NOT declared here — they live in the project's own
   `.canopy/` store (see ADR-0005). Git-native, versioned with the code; the Project CR
   references it by repo + path. Path/format: `.dagmar/project.yaml` (YAML); the CR has
-  no `checkable-source` field — checkables live in the manifest (ADR-0003). Grows via
-  dogfooding.
+  no `checkable-source` field — checkables live in the manifest (ADR-0003). The manifest
+  declares **what** the checkables are; the Justfile target `dagmar-gate` (ADR-0009) is the
+  **execution wrapper** that runs them — manifest = *what*, `dagmar-gate` = *how*. Grows
+  via dogfooding.
+
+**Forthcoming (referenced, not yet realized):**
+
+- **Workflow** — the container concept introduced by the Dagger-based software-factory
+  reframe (ADR-0009): a thin CRD referencing a Dagger Go function. The general framework
+  is tracked in seed `dagmar-ff60` (no ADR yet — not a decided CRD). Today the
+  quality-gate family is realized through existing CRDs (`Run` / `QualityGate` /
+  `Trigger`); "Workflow" is used as the family/container concept pending that ADR.
 
 **Roles (Agent specializations, not separate types):**
 
@@ -145,11 +157,14 @@ dogfooding).
   `Task 1:N Runs`, each `Run 1:1 Sandbox`, all under one Engine.
 - **Work hierarchy:** `Project 1:N Tasks`; `Task ≡ 1 seeds issue`; `Task 1:N Runs`.
 - **Workspace:** per-Task base ref; per-Run isolated clone with in/out lineage.
-- **Gating flow:** coder-Run → candidate → **two green lights** (QualityGate ∧
-  ReviewAgent.approve) → `merge ⟺ both green ∧ authority==auto`; else `{revise |
-  escalate}`. Merge is a deterministic Dagger function, not an LLM action (ADR-0006).
-  With `authority=human` the gate runs **post-merge** (reactive: human merges → gate
-  review → fix PR if broken).
+- **Gating flow:** coder-Run → candidate → **gate (always pre-merge)** → **two green
+  lights** (QualityGate ∧ ReviewAgent.approve) → `merge ⟺ both green ∧ authority==auto`;
+  else `{revise | escalate}`. The gate is **invariant** — it always runs on the candidate
+  **pre-merge**; under `authority=human` the Gate + Review run pre-merge as **advisory**
+  and the human merges (ADR-0006, ADR-0009 §7). Merge is a deterministic Dagger function,
+  not an LLM action (ADR-0006). The **post-merge watchdog** is a **separate workflow**
+  with a filtered trigger (fires only on human/spontaneous merges); Gate-Red/Veto there
+  opens a fix-PR (ADR-0009 §8) — it is *not* "the gate running post-merge".
 - **Disagreement (Gate ↔ Reviewer):** revise if the veto is actionable; else
   **escalate** to a human. The deferred Calibration Agent (ADR-0006) will later
   diagnose gate-gaps automatically; until then every unresolved disagreement
@@ -162,7 +177,8 @@ dogfooding).
 ## CRD boundary
 
 CRDs: `{Project, Agent, Prompt, QualityGate, Trigger, Run}`. Non-CR:
-`{Task, Sandbox, Workspace, ProjectManifest}`. The boundary follows each entity's state
+`{Task, Sandbox, Workspace, ProjectManifest}`. **Workflow** is referenced by ADR-0009
+but is *forthcoming*, not yet a CRD (→ seed `dagmar-ff60`). The boundary follows each entity's state
 property (declarative/reconciled → CR; canonical-elsewhere or runtime → not) — see
 **ADR-0002** for the full table and rationale.
 

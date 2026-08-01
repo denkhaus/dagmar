@@ -22,8 +22,11 @@ triggers it acts on.
 ### Two slim axes (not a fixed ladder)
 1. **Merge authority** — `human` (default; dagmar opens PRs, human merges) | `auto`
    (dagmar merges on gate-pass).
-2. **Trigger tier** — `on-demand` (human starts a Run) | `reactive` (events: issue→work;
-   human-merge→post-merge gate review→fix PR) | `proactive` (cron housekeeping).
+2. **Trigger tier** — `on-demand` (human starts a Run) | `reactive` (events:
+   issue/webhook → work) | `proactive` (cron housekeeping). The post-merge **watchdog**
+   — Gate + Review run on a merged HEAD after a human/spontaneous merge — is **not** a
+   reactive-tier event; it is a **separate workflow with a filtered trigger** (ADR-0009
+   §8). The gate itself is **invariant and always runs pre-merge** (ADR-0009 §7).
 
 "Autonomy level" = `{merge-authority} × {trigger-tier}`. Start minimal: `{human,
 on-demand}`; grow by enabling reactive → auto-merge → proactive.

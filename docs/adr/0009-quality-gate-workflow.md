@@ -37,6 +37,14 @@ seeds/ADRs (the latter sharpens ADR-0007).
   checkables: build/test/lint + rules/thresholds + static analysis). These are the project's
   conformance contract for deterministic execution (analogous to the ProjectManifest,
   ADR-0003).
+- **Relationship to the ProjectManifest (ADR-0003):** the manifest declares **what** the
+  checkables are (its `checkables:` section); `dagmar-gate` is the **execution wrapper**
+  that runs them — manifest = *what*, Justfile target = *how to invoke*. `dagmar-gate` does
+  **not** re-declare checkables; it is the single deterministic entry point that consumes
+  the manifest-declared checkables, so the manifest stays authoritative for "the
+  checkables" (no projection ambiguity). This makes **`just` (Justfile) a mandatory runtime
+  tool for every conforming Project** — a conformance dependency introduced here, not in
+  ADR-0003.
 
 ### 3. Hermetic LLM via the tool-set (trust zone)
 
@@ -48,6 +56,13 @@ seeds/ADRs (the latter sharpens ADR-0007).
 - Rationale: the LLM processes untrusted content (repo/issues/PRs → prompt-injection risk);
   hermetic prevents exfiltration and tool-install. The full Sandbox trust-zone model is a
   separate ADR (it sharpens ADR-0007's encapsulation boundary).
+- **Capability-boundary dependency (GAP):** "excludes any network-capable tool" is the
+  *principle*, not a pinned surface — the Tool glossary lists `container` and `git` as
+  network-capable, and whether those (or only `http`) are withheld for hermetic agents — and
+  whether hermeticity is additionally enforced by a Sandbox-pod NetworkPolicy — is defined by
+  the **forthcoming Sandbox trust-zone ADR** (→ seed `dagmar-911b`; the most consequential
+  missing ADR — review 2026-08-01-mache §C1). ADR-0009 asserts the enforcement *mechanism
+  class* (tool-set exclusion), not the resolved per-tool boundary.
 
 ### 4. Decision flow — gate-before-review, revise loop, max-N termination
 
@@ -74,7 +89,7 @@ gate-before-review), the **Calibration Agent** (a non-gating LLM step) diagnoses
 (gate-gap vs reviewer-drift) and emits a `review-calibration` mixin, persisted in the
 **project's canopy** via the Prompts port (ADR-0005). The ReviewAgent prompt is then composed
 as `dagmar review-agent ⊕ project review-calibration ⊕ project content` (ADR-0006). Effect:
-ReviewAgent and Gate **co-evolve stufenweise**. Mixins are **operator-approved initially**
+ReviewAgent and Gate **co-evolve incrementally**. Mixins are **operator-approved initially**
 (auto-apply deferred, ADR-0006). It is a non-gating analyzer — **no gate-of-gates**, no
 infinite regress.
 
@@ -90,7 +105,10 @@ conflicts and Calibration complexity.
 - `authority=auto` → the controller merges the PR on Two-Green. **Delivered = merged.**
 - `authority=human` → dagmar opens the PR; Gate + Review run pre-merge as **advisory**; the
   human merges. **Delivered (dagmar's view) = PR handoff.**
-- The gate is **invariant** — it always runs on the candidate, pre-merge (ADR-0006).
+- The gate is **invariant** — it always runs on the candidate, **pre-merge**. (The gate
+  being non-negotiable is from ADR-0006; the **pre-merge** timing and the separate
+  post-merge watchdog are specified here in §7/§8 — ADR-0006's reactive tier does *not*
+  run the gate post-merge.)
 
 ### 8. Post-merge watchdog = separate workflow, filtered trigger
 
@@ -120,8 +138,11 @@ unreviewed merges), not a component of every workflow.
   deterministic gate conformance contract; ReviewAgent = one cognitive role (specialists
   later); Calibration loop = disagreement → `review-calibration` mixin → co-evolution;
   post-merge watchdog = filtered safety-net workflow.
-- **Project contract:** a Project must expose `dagmar-bootstrap` and `dagmar-gate` entry
-  points (Justfile targets) as its gate conformance (alongside the ProjectManifest, ADR-0003).
+- **Project contract:** a Project must expose `dagmar-bootstrap` and `dagmar-gate` (Justfile
+  targets) as its gate conformance. These **wrap** the manifest-declared checkables
+  (ADR-0003) — manifest = *what*, `dagmar-gate` = *how to run* — so `just` (Justfile) is a
+  mandatory runtime tool for every conforming Project (conformance dependency introduced
+  here, not in ADR-0003).
 - **ADR-0006:** used/confirmed (two-green, veto, Calibration Agent workflow). **ADR-0005:**
   `review-calibration` mixin composition. **ADR-0003:** Justfile-target gate conformance.
 - **Spun out (separate seeds/ADRs):** general Workflow-CRD framework; Sandbox trust-zones /

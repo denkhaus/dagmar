@@ -7,7 +7,7 @@ argument-hint: "[scope-label]"
 
 Perform a repeatable design-doc review of this project's architecture foundations
 (`CONTEXT.md`, `docs/adr/`, `docs/agents/*`). Reproduce the exact review shape used in
-`docs/review/2026-07-31-foundations-review.md`.
+`docs/review/01-2026-07-31-59a2465-foundations.md`.
 
 Scope label for the output filename: `${1:-foundations}`
 
@@ -31,9 +31,10 @@ planning agent's input.
 
 ## Steps
 
-1. **Prime context.** Note the current date from the system context; it is used in the
-   output filename. Run `sd list` to learn which findings are *already tracked* so the
-   review does not re-surface them as new.
+1. **Prime context.** Note the current date and compute the output filename per the
+   convention in **Output** below: `NN` = `max(existing NN) + 1` over `docs/review/`,
+   `<shorthash>` = `git rev-parse --short HEAD`. Run `sd list` to learn which findings
+   are *already tracked* so the review does not re-surface them as new.
 
 2. **Gather (use context-mode tools — never raw `cat`/`grep` for analysis).**
    Read fully (these are small, must be read verbatim to compare wording):
@@ -67,13 +68,37 @@ planning agent's input.
 
 ## Output
 
+### Filename convention (decided 2026-08-01)
+
+Review reports are **numbered, dated, and pinned to the reviewed commit** so they sort
+chronologically and trace to an exact doc-tree state:
+
+```
+docs/review/NN-YYYY-MM-DD-<shorthash>-<scope>.md
+```
+
+- `NN` — zero-padded 2-digit running sequence across **all reviews** (chronological
+  order). Compute as `max(existing NN) + 1` (list `docs/review/` and take the highest `NN`).
+- `YYYY-MM-DD` — date the review is performed.
+- `<shorthash>` — 7-char short SHA of the commit the review was performed against, i.e.
+  `git rev-parse --short HEAD` at review time (the committed baseline; the review reads
+  the working tree but pins the baseline commit for reproducibility).
+- `<scope>` — the invocation scope label (lowercase); default `foundations`.
+
+Examples: `01-2026-07-31-59a2465-foundations.md`, `04-2026-08-01-8e8d35d-mache.md`.
+
+**Only review reports carry the `NN-…` scheme.** A session handoff / resolution doc
+(companion to a review, recording what a resolution pass changed) is a *different
+artifact*: keep it `<YYYY-MM-DD>-<scope>-resolution.md` (unnumbered) so it is not
+confused with a review.
+
 Write the report to:
 
 ```
-docs/review/<YYYY-MM-DD>-${1:-foundations}-review.md
+docs/review/NN-YYYY-MM-DD-<shorthash>-${1:-foundations}.md
 ```
 
-Use the **same structure** as `docs/review/2026-07-31-foundations-review.md`:
+Use the **same structure** as `docs/review/01-2026-07-31-59a2465-foundations.md`:
 
 - Top scope line + tag legend (`[FIX]` / `[GAP]` / `[HOUSE]`).
 - **A. Inconsistencies / contradictions**
