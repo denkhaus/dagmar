@@ -66,7 +66,8 @@ dogfooding).
 
 - **Project** (CRD) — a registered, repo-backed repository dagmar operates on (own
   repo or fork). Carries **dagmar-operational config only** (os-eco binding,
-  credentials, and the **autonomy setting** — `merge-authority` (human|auto),
+  credentials (the three typed classes `vcs`/`os-eco`/`llm`; ADR-0007), and the
+  **autonomy setting** — `merge-authority` (human|auto),
   `trigger-tier` (on-demand|reactive|proactive); ADR-0006 — and references the repo's
   ProjectManifest.
   Project-specific content (incl. `checkables`) lives in the manifest, not on the CR.
@@ -95,8 +96,8 @@ dogfooding).
 - **Task** — a unit of work on exactly one Project; ≡ one seeds issue (1:1, canonical).
   Lifecycle: created → Runs → resolved. Spawns 1..N Runs.
 - **Sandbox** — an isolated execution slot subordinate to the Engine
-  (`Engine ⊃ Sandbox`); the credentialed, resource-bounded pod + engine-session an
-  Agent process runs in. `1 Run : 1 Sandbox`.
+  (`Engine ⊃ Sandbox`); the credentialed (per-Run projected secret subset; ADR-0007),
+  resource-bounded pod + engine-session an Agent process runs in. `1 Run : 1 Sandbox`.
 - **Workspace** — a task-scoped, Run-isolated clone of a Project on a branch + its
   checkable; handed to Dagger as a CodeWorkspace. Strictly isolated per Run (no shared
   clone — avoids file-change collisions); Workspace lineage across a Task's Runs
@@ -178,8 +179,6 @@ seeds `dagmar-3684`, Go module layout & hex arch):
 
 ## Open questions (tracked, not yet decided)
 
-- **Credentials & secrets** — storage, per-Project scoping, injection into Sandbox /
-  `dag.Env()`. _(seeds `dagmar-4c9f`.)_
 - **Engine tenancy & Run concurrency** — singleton vs per-Project Engine; Sandbox
   isolation/quotas; concurrent Runs on one Task; who sequences Workspace lineage.
   _(Open sub-questions of ADR-0004; seeds `dagmar-cbb8`.)_
@@ -194,3 +193,4 @@ See `docs/adr/`:
 - **ADR-0004** — Execution topology (Hybrid-C)
 - **ADR-0005** — Prompt composition (dagmar-side cross-store merge, Variant A)
 - **ADR-0006** — Autonomy model (slim axes, deterministic merge, two-green + veto)
+- **ADR-0007** — Credentials & secret management (per-Project namespace, typed secrets, ESO, projected injection)
