@@ -41,14 +41,18 @@ name**. The controller allocates **distinct cache-volume names per Project**, wh
 cross-Project cache isolation (Research Q1). Cache poisoning across Projects is prevented
 as long as Projects never share a cache-volume name.
 
-### 4. Namespaces = optional (defense-in-depth)
+### 4. Namespaces = mandatory per Project (per ADR-0007) — defense in depth
 
-Namespaces are **not** required for tenancy — the singleton engine + per-Project
-ServiceAccount/RBAC + per-Project cache-volume names already provide isolation. They
-remain available as defense-in-depth (blast-radius, NetworkPolicy, ResourceQuota). If
-adopted later, use a common prefix `dagmar-<project>` for traceability. (This sharpens
-ADR-0007: credential isolation is a Sandbox/encapsulation property; namespaces are tenancy
-hygiene, not the credential control.)
+Each Project runs in its own namespace; ADR-0007 §1 makes the namespace the hard, auditable
+credential trust boundary, and engine tenancy does **not** relax that. The singleton
+engine's tenancy/cache isolation (per-Project ServiceAccount/`pods/exec` RBAC + per-Project
+cache-volume names) is a **separate layer on top of** the mandatory namespace boundary, not
+a replacement for it. Defense in depth, two levels: (1) the K8s-native per-Project namespace
+boundary (strongest), and (2) Sandbox encapsulation — secrets are projected per-`Run` into
+the Sandbox and never enter the LLM-reachable environment (ADR-0007 §5) — so even a Sandbox
+escape stays bounded to one Project's namespace. (Earlier this section said namespaces were
+"optional"; that contradicted ADR-0007 and is retracted — resolved in response to the
+2026-08-01 review, item A1.)
 
 ### 5. Concurrency & Workspace lineage = controller-level (deferred)
 
@@ -61,16 +65,19 @@ design.
 
 - **Per-Project / per-namespace engines.** Rejected — no warrant for the resource cost and
   operational complexity; the owner cannot justify a separate engine per Project.
-- **Namespaces as the primary tenancy boundary.** Rejected for tenancy (singleton engine +
-  RBAC + cache-volume names suffice); retained only as optional defense-in-depth.
+- **Namespaces as the primary *tenancy* boundary.** Rejected for *tenancy* (singleton
+  engine + RBAC + cache-volume names suffice for engine/client isolation). Namespaces remain
+  **mandatory** for *credential* isolation per ADR-0007 — a separate concern this ADR does
+  not override.
 
 ## Consequences
 
 - **Glossary:** agent pods are `kube-pod://` clients of the singleton engine, each with its
   own ServiceAccount + `pods/exec` RBAC; "cache isolation" = per-Project cache-volume names.
 - **ADR-0004:** the in-cluster engine is **singleton**; agent pods are its clients.
-- **ADR-0007:** credential-isolation rationale sharpened (encapsulation is the control;
-  namespaces optional) — no change to storage/scoping.
+- **ADR-0007:** no change — namespaces remain the mandatory per-Project credential boundary.
+  The singleton engine's per-Project SA/RBAC + cache-volume names are an additional layer on
+  top (defense in depth: namespace boundary + Sandbox encapsulation).
 - **Operations:** the controller must provision, per Project, (a) a ServiceAccount + a
   `pods/exec` RoleBinding to the engine pod, and (b) a distinct cache-volume name space.
 - **Deferred:** concurrent-Runs-on-one-Task policy and Workspace-lineage sequencing

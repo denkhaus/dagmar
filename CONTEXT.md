@@ -30,8 +30,9 @@ See ADR-0001.
 
 - **Engine** — the hermetic Dagger execution engine. The resource that provisions and
   contains Sandboxes (`Engine ⊃ Sandbox`). dagmar runs an in-cluster instance but
-  treats the Engine as a Tier-A resource. _(Engine cardinality/tenancy — singleton vs
-  per-Project, cross-Project isolation — is an open execution decision; see ADR-0004.)_
+  treats the Engine as a Tier-A resource. _(Engine cardinality/tenancy is decided: a
+  singleton engine serves all Projects; cross-Project isolation via per-Project
+  ServiceAccount/RBAC + cache-volume names — see ADR-0008.)_
 - **LLM** — Dagger's LLM primitive (`dag.LLM()`); the cognition provider. dagmar does
   not reimplement cognition.
 - **Env** — Dagger environment bundling inputs/outputs/tools for an LLM (`dag.Env()`).
@@ -117,8 +118,8 @@ dogfooding).
 
 - **ReviewAgent** — an Agent role that cognitively reviews another Run's output and
   holds a **hard veto**; co-equal gate with the QualityGate (merge needs both green,
-  ADR-0006). Prompt = dagmar `review-agent` mixin ⊕ project `review-calibration` mixin
-  (ADR-0005).
+  ADR-0006). Prompt = dagmar `review-agent` mixin ⊕ project `review-calibration` mixin ⊕
+  project content (ADR-0005).
 - **Calibration Agent** *(deferred)* — a non-gating LLM step that, on QualityGate ↔
   ReviewAgent disagreement, diagnoses the cause and emits project-specific
   `review-calibration` mixins into the project's canopy (ADR-0006).

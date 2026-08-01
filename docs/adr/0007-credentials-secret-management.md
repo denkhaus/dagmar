@@ -113,6 +113,12 @@ Two invariants carry over from prior decisions:
 - **ADR-0004 inherits:** the per-Project namespace topology and the `Sandbox`
   env-projection model are now fixed inputs to engine-tenancy / concurrency work
   (seed `dagmar-cbb8`).
+- **Defense in depth (two layers) + ADR-0008:** (1) the per-Project namespace is the
+  primary K8s-native credential boundary; (2) Sandbox encapsulation — secrets projected
+  per-`Run`, never in the LLM-reachable environment — bounds any Sandbox escape to one
+  Project's namespace. ADR-0008 (engine tenancy) layers per-Project ServiceAccount/
+  `pods/exec` RBAC + cache-volume names **on top of** this; it does **not** make namespaces
+  optional. (Confirmed in response to the 2026-08-01 review, item A1.)
 - **ADR-0006 preserved:** merge stays controller-level; the `llm` key never enters an
   Agent tool-set.
 - **Operations:** ESO + an external backend and etcd encryption-at-rest become deployment
