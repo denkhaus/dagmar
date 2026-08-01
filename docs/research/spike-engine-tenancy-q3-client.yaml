@@ -1,0 +1,63 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: dagger-client
+  namespace: dagmar
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: dagger-client-exec
+  namespace: dagmar
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list"]
+- apiGroups: [""]
+  resources: ["pods/exec"]
+  verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: dagger-client-exec
+  namespace: dagmar
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: dagger-client-exec
+subjects:
+- kind: ServiceAccount
+  name: dagger-client
+  namespace: dagmar
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: dagger-client
+  namespace: dagmar
+spec:
+  serviceAccountName: dagger-client
+  restartPolicy: Never
+  containers:
+  - name: client
+    image: alpine:3.20
+    command: ["/bin/sh", "-c"]
+    args:
+    - |
+      set -e
+      echo ">>> install kubectl + dagger CLI"
+      apk add --no-cache kubectl curl tar >/dev/null
+      curl -fsSL https://github.com/dagger/dagger/releases/download/v0.21.8/dagger_v0.21.8_linux_amd64.tar.gz | tar -xz -C /usr/local/bin dagger
+      echo ">>> discover engine pod"
+      ENGINE_POD=$(kubectl get pods -n dagmar -l name=dagger-dagger-helm-engine -o jsonpath='{.items[0].metadata.name}')
+      echo "engine-pod: $ENGINE_POD"
+      echo ">>> build in-cluster kubeconfig from SA token"
+      TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+      printf 'apiVersion: v1\nkind: Config\nclusters:\n- name: c\n  cluster:\n    server: https://kubernetes.default.svc\n    certificate-authority: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt\nusers:\n- name: u\n  user:\n    token: %s\ncontexts:\n- name: ctx\n  context:\n    cluster: c\n    user: u\ncurrent-context: ctx\n' "$TOKEN" > /tmp/kc
+      export KUBECONFIG=/tmp/kc
+      export _EXPERIMENTAL_DAGGER_RUNNER_HOST=kube-pod://$ENGINE_POD?namespace=dagmar
+      echo "runner-host: $_EXPERIMENTAL_DAGGER_RUNNER_HOST"
+      echo ">>> dagger core version via kube-pod:// (Q3 test)"
+      dagger core version
+      echo ">>> Q3_RESULT: client reached inner engine via kube-pod://"
