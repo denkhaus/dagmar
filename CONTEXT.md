@@ -179,9 +179,9 @@ seeds `dagmar-3684`, Go module layout & hex arch):
 
 ## Open questions (tracked, not yet decided)
 
-- **Engine tenancy & Run concurrency** — singleton vs per-Project Engine; Sandbox
-  isolation/quotas; concurrent Runs on one Task; who sequences Workspace lineage.
-  _(Open sub-questions of ADR-0004; seeds `dagmar-cbb8`.)_
+- **Run concurrency & Workspace lineage** — concurrent Runs on one Task; who sequences
+  Workspace lineage. _(Deferred to control-plane design; engine tenancy decided in
+  ADR-0008, seeds `dagmar-cbb8`.)_
 
 ## Architectural decisions
 
@@ -194,3 +194,4 @@ See `docs/adr/`:
 - **ADR-0005** — Prompt composition (dagmar-side cross-store merge, Variant A)
 - **ADR-0006** — Autonomy model (slim axes, deterministic merge, two-green + veto)
 - **ADR-0007** — Credentials & secret management (per-Project namespace, typed secrets, ESO, projected injection)
+- **ADR-0008** — Engine tenancy & Run concurrency (singleton engine, kube-pod:// agent pods + RBAC, per-Project cache volumes)
