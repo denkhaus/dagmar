@@ -71,15 +71,21 @@ args optional, so infra/spike methods remain callable without a binding). Method
 
 ### 6. v0 vertical — `Sandbox`
 
-`Sandbox(image, workingDir)` constructs a pure `domain.SandboxSpec`, delegates to
-`app.BuildSandbox` (Tier-A-direct `Container`), and returns a chainable `*Sandbox`. Proven
-end-to-end against the engine (exit 0). No LLM, no network beyond the base-image pull.
+`Sandbox(image, workingDir)` constructs a pure `domain.SandboxSpec`, and `app.BuildSandbox`
+validates it at the top of the binding (the functional-core contract, §3 — so no caller can
+skip it; a malformed spec surfaces as `domain: SandboxSpec.Image is required`, not an opaque
+engine error) before applying the Tier-A-direct `Container` binding and returning a chainable
+`*Sandbox`. Proven end-to-end against the engine (exit 0). No LLM, no network beyond the
+base-image pull.
 
 ### 7. Testing — three-tier + GoMock
 
 - `domain/` — pure table-tests, no Dagger, fastest.
 - `app/` port-logic — unit-tested against `mockgen`-generated mocks of the os-eco ports
   (`go.uber.org/mock`, per KB `guide.golang.testing`; in-package mocks via `ports/generate.go`).
+  The tool is a tracked module dependency (`tools.go`, `//go:build tools`) and `mock_oseco.go`
+  is committed, so a fresh checkout resolves it from the module cache — no live network at
+  `go generate` time.
 - `app/` Dagger-direct logic — `//go:build integration` via a real engine.
 - Plus Dagger `// check` functions for module invariants.
 
@@ -89,8 +95,12 @@ DI = **plain constructor injection** (no `samber/do`); `New()` is the compositio
 
 - Logging: a `Logger` interface (KB `guide.golang.logging`) over stdlib `log/slog` (the KB's
   documented Go-1.26 minimal-dependency alternative), injected via constructors.
-- Config: `envconfig` sub-structs for runtime/env; the **ProjectManifest** (`.dagmar/project.yaml`,
-  ADR-0003) for declarative per-Project conformance.
+- Config: `envconfig`-style struct tags for runtime/env (the env resolver is not yet wired —
+  tags are prospective until it lands); the **ProjectManifest** (`.dagmar/project.yaml`,
+  ADR-0003) for declarative per-Project conformance. The two same-shape os-eco triples
+  reconcile at runtime: the constructor-seam binding (`main.OsEcoBinding`, from the
+  ProjectManifest) is authoritative for a Run's store paths; `config.OsEcoConfig` is the
+  env-override view of the same triple.
 - Observability: behind a `Tracer` port; default = Dagger otel + `TokenUsage` (already deps);
   Langfuse is a deferred opt-in adapter (KB pattern, `Enabled` toggle).
 
@@ -126,8 +136,10 @@ These surfaced while scaffolding and shaped the seam:
 - **Glossary:** `.dagger/internal/{domain,ports,adapters,app,tools,workflows,config,log}` = the
   skeleton; `Dagmar` main object + `New` constructor = the per-Project binding seam; functional
   core = `domain/` (pure) + `app/` (Tier-A-direct).
-- **Landed:** 12 hand-written files + regenerated bindings; `go build`/`test`/`vet` green;
-  `dagger develop` clean; the `Sandbox` vertical proven (exit 0).
+- **Landed:** 13 hand-written files + `mock_oseco.go` (generated, committed) + regenerated
+  bindings; `go build`/`test`/`vet` green; `dagger develop` clean; the `Sandbox` vertical
+  proven end-to-end (exit 0), and the functional-core validation gate proven on the live
+  path (empty image → clean domain error).
 - **Spike:** the cbb8 methods (`Up`/`DeployEngine`/`Probe`) remain on the `Dagmar` object; to be
   refactored into `workflows/bootstrap` later.
 - **ADR links:** ADR-0001 (Tier A direct, Tier B ports) confirmed; ADR-0003 (ProjectManifest =

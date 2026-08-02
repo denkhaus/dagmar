@@ -10,10 +10,15 @@ import (
 )
 
 // BuildSandbox realizes a domain.SandboxSpec as a Dagger Container (Tier A, direct). The
-// spec is validated by the caller via the pure domain.SandboxSpec.Validate (functional
-// core); this function only applies the Dagger binding. No LLM, no network beyond the
-// base-image pull — the cheap v0 vertical proving the layout seams.
-func BuildSandbox(spec domain.SandboxSpec) *dagger.Container {
+// spec is validated HERE, at the top of the binding (the functional-core contract,
+// ADR-0010 §3), so that NO caller — now or future — can skip it: a malformed spec surfaces
+// as a clean domain error (e.g. "domain: SandboxSpec.Image is required") instead of an
+// opaque engine failure like Container().From(""). No LLM, no network beyond the base-image
+// pull — the cheap v0 vertical proving the layout seams.
+func BuildSandbox(spec domain.SandboxSpec) (*dagger.Container, error) {
+	if err := spec.Validate(); err != nil {
+		return nil, err
+	}
 	// dagger.Connect() returns the SDK's process-wide singleton client (set in
 	// internal/dagger's init() when the Dagger runtime provides DAGGER_SESSION_PORT).
 	// The main package uses the package-local `dag`; sub-packages use Connect() — same
@@ -22,5 +27,5 @@ func BuildSandbox(spec domain.SandboxSpec) *dagger.Container {
 	if spec.Workdir != "" {
 		ctr = ctr.WithWorkdir(spec.Workdir)
 	}
-	return ctr
+	return ctr, nil
 }

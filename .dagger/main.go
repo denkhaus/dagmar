@@ -88,8 +88,12 @@ func (m *Dagmar) Sandbox(
 	// workdir, to avoid a CLI flag collision with *dagger.Container's own workdir field.
 	// +optional
 	workingDir string,
-) *Sandbox {
-	return &Sandbox{ctr: app.BuildSandbox(domain.SandboxSpec{Image: image, Workdir: workingDir})}
+) (*Sandbox, error) {
+	ctr, err := app.BuildSandbox(domain.SandboxSpec{Image: image, Workdir: workingDir})
+	if err != nil {
+		return nil, err
+	}
+	return &Sandbox{ctr: ctr}, nil
 }
 
 // Sandbox is the Dagger object returned by Dagmar.Sandbox — a thin, chainable wrapper over
