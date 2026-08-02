@@ -15,10 +15,94 @@ import (
 	"strings"
 	"time"
 
+	"dagger/dagmar/internal/app"
 	"dagger/dagmar/internal/dagger"
+	"dagger/dagmar/internal/domain"
 )
 
-type Dagmar struct{}
+// Dagmar is dagmar's main Dagger object (auto-named from the module). It is the primary
+// entry point into dagmar's Dagger functionality AND the per-Project binding seam: the New
+// constructor binds the target Project + os-eco configuration once, and every method
+// (Run, Sandbox, Gate, ...) reuses that bound state (ADR-0010 §5).
+type Dagmar struct {
+	// Project is the source directory of the target Project dagmar operates on
+	// (per-Project binding). *dagger.Directory, not *dagger.Workspace: Workspace-as-input
+	// is unsupported by engine v0.21.8's codegen ("cannot code-generate ... unsupported
+	// types"), and a Directory is the version-independent representation of a project
+	// source tree (the SDK itself maps Workspace -> Directory; ADR-0010 §5).
+	// +private
+	Project *dagger.Directory
+	// OsEco binds the os-eco backing services (seeds/mulch/canopy store paths) per-Project.
+	// +private
+	OsEco OsEcoBinding
+}
+
+// OsEcoBinding is the per-Project binding for the os-eco backing services (ADR-0005):
+// store paths for seeds (issues), mulch (memory), and canopy (prompts).
+type OsEcoBinding struct {
+	// Seeds is the seeds issue-store path for this Project.
+	Seeds string
+	// Mulch is the mulch expertise-store path for this Project.
+	Mulch string
+	// Canopy is the canopy prompt-store path for this Project.
+	Canopy string
+}
+
+// New is dagmar's constructor (ADR-0010 §5). Its arguments bind the per-Project context
+// (the Project source + os-eco configuration) that every method reuses. All arguments are
+// optional so the infra/spike methods (Up, DeployEngine, Probe) remain callable without a
+// Project binding — they ignore the bound state.
+//
+// The os-eco paths are passed as primitives (not an OsEcoBinding struct) because v0.21.8's
+// codegen skips a custom struct used directly as a constructor arg; OsEcoBinding remains the
+// grouped field, populated here (ADR-0010 §5).
+func New(
+	// The target Project's source directory (per-Project binding seam).
+	// +optional
+	project *dagger.Directory,
+	// seeds issue-store path for the Project (os-eco binding, per-Project).
+	// +optional
+	seeds string,
+	// mulch expertise-store path for the Project (os-eco binding, per-Project).
+	// +optional
+	mulch string,
+	// canopy prompt-store path for the Project (os-eco binding, per-Project).
+	// +optional
+	canopy string,
+) *Dagmar {
+	return &Dagmar{Project: project, OsEco: OsEcoBinding{Seeds: seeds, Mulch: mulch, Canopy: canopy}}
+}
+
+// Sandbox realizes an isolated, credentialed execution slot (a Dagger Container — Tier A,
+// used directly; ADR-0010 §3). This is the v0 vertical proving the layout seams (functional
+// core -> app Tier-A-direct -> main delegation -> a chainable custom return object) without
+// an LLM call. Delegates to app.BuildSandbox.
+//
+// NOTE: the args are primitives (not a domain.SandboxSpec) because Dagger cannot code-generate
+// for a foreign (non-main-package) input type. The pure domain.SandboxSpec is constructed at
+// this seam from the primitives; domain stays Dagger-free and unit-tested (ADR-0010 §3).
+func (m *Dagmar) Sandbox(
+	// Base OCI image for the Sandbox container.
+	image string,
+	// Working directory inside the Sandbox (empty = image default). Named workingDir, not
+	// workdir, to avoid a CLI flag collision with *dagger.Container's own workdir field.
+	// +optional
+	workingDir string,
+) *Sandbox {
+	return &Sandbox{ctr: app.BuildSandbox(domain.SandboxSpec{Image: image, Workdir: workingDir})}
+}
+
+// Sandbox is the Dagger object returned by Dagmar.Sandbox — a thin, chainable wrapper over
+// the realized Container. Exported methods on it become callable Dagger functions.
+type Sandbox struct {
+	// +private
+	ctr *dagger.Container
+}
+
+// Container returns the underlying Dagger Container (Tier A).
+func (s *Sandbox) Container() *dagger.Container {
+	return s.ctr
+}
 
 const engineLabel = "name=dagger-dagger-helm-engine"
 
