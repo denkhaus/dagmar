@@ -1,8 +1,11 @@
+spec_version: 1
 name: dagmar-review
 description: Permanent on-demand reviewer for dagmar. Invoked after a major work session to review the changes (Standards + Spec + foundations coherence) and write a numbered report to docs/review/. Advises only; does NOT execute (no seed filing, no fixes).
 executor:
-  harness: claude-native
+  type: omnigent
   context_window: 200000
+  config:
+    harness: claude-native
 spawn: true
 os_env:
   type: caller_process
