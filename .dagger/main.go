@@ -259,3 +259,32 @@ func (m *Dagmar) Probe(ctx context.Context,
 	}
 	return fmt.Sprintf("runner-host: %s\ninner-engine: %s", runnerHost, out), nil
 }
+
+// ProbeNet is the dagmar-911b trust-zone spike: it empirically tests whether a Dagger
+// container exec has outbound network access by default. Dagger v0.21.8 exposes NO per-exec
+// no-network option (ContainerWithExecOpts has no network/egress field). This establishes
+// the residual-risk fact that ADR-0011 consciously accepts: tool-set exclusion is NOT a hard
+// network guarantee (a raw exec path can still reach the network). LLM-free.
+// (cbb8-style spike; to be refactored into workflows/ later — ADR-0010 Consequences.)
+func (m *Dagmar) ProbeNet(ctx context.Context) (string, error) {
+	// End-to-end reachability (DNS + TCP + HTTP) to a stable, low-risk endpoint from inside
+	// a container exec — the same kind of exec a hermetic LLM Loop / checkable would run.
+	// Alpine ships busybox wget (no apk install needed); --timeout bounds the wait. The exit
+	// code is captured directly (not via a pipe, which would mask it as head's exit).
+	const cmd = "wget -qO /tmp/out --timeout=5 https://example.com 2>/tmp/err; " +
+		"code=$?; echo \"HTTP_FETCH_EXIT=$code\"; " +
+		"echo \"--- body (first 120B) ---\"; head -c 120 /tmp/out; echo; " +
+		"echo \"--- stderr (first 200B) ---\"; head -c 200 /tmp/err"
+	out, err := dag.Container().
+		From("alpine:3.20").
+		WithExec([]string{"sh", "-c", cmd}).
+		Stdout(ctx)
+	if err != nil {
+		return "", fmt.Errorf("ProbeNet exec failed: %w", err)
+	}
+	verdict := "NET_NONE — container exec has NO outbound network (egress already denied at engine/pod level)"
+	if strings.Contains(out, "HTTP_FETCH_EXIT=0") {
+		verdict = "NET_OK — container exec HAS outbound network by default, and Dagger v0.21.8 has no per-exec no-network flag. Tool-set exclusion is therefore NOT a hard network guarantee (a raw exec path can still reach the network); this residual risk is consciously accepted (ADR-0011) — primary control = tailored tool-set, blast radius bounded by ADR-0007."
+	}
+	return fmt.Sprintf("=== dagmar-911b ProbeNet (container-exec outbound test) ===\n%s\n=== VERDICT: %s ===\n", out, verdict), nil
+}
