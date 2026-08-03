@@ -80,6 +80,12 @@ design.
   top (defense in depth: namespace boundary + Sandbox encapsulation).
 - **Operations:** the controller must provision, per Project, (a) a ServiceAccount + a
   `pods/exec` RoleBinding to the engine pod, and (b) a distinct cache-volume name space.
+- **Validated (Research Q1):** cache isolation by volume name was empirically confirmed
+  2026-08-03 (seed `dagmar-d8f0`) via the `ProbeCache` spike (`.dagger/main.go`) — three
+  separate `dagger call` client sessions against one engine showed a same-named volume
+  SHARES the marker (positive control) while a differently-named volume does NOT (ISOLATED).
+  The engine-level mechanic is topology-agnostic (holds for local and `kube-pod://` clients
+  alike); the remaining cross-Project concern is purely the controller allocating distinct
+  cache-volume names per Project (the control-plane guarantee above).
 - **Deferred:** concurrent-Runs-on-one-Task policy and Workspace-lineage sequencing
-  (control-plane design); an empirical Q1 cache-poisoning test (the design conclusion
-  stands; the spike host is kind, production uses dedicated runner nodes per ADR-0004).
+  (control-plane design).

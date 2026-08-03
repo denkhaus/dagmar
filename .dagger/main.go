@@ -288,3 +288,74 @@ func (m *Dagmar) ProbeNet(ctx context.Context) (string, error) {
 	}
 	return fmt.Sprintf("=== dagmar-911b ProbeNet (container-exec outbound test) ===\n%s\n=== VERDICT: %s ===\n", out, verdict), nil
 }
+
+// ProbeCache is the dagmar-d8f0 spike: it empirically validates that a Dagger engine isolates
+// cache by volume NAME (the ADR-0008 §3 design assumption — "Dagger isolates cache by volume
+// name; cache poisoning across Projects is prevented as long as Projects use distinct
+// cache-volume names"). It is run as THREE separate `dagger call probe-cache --mode ...`
+// invocations — i.e. three separate client sessions against one engine, the cheapest faithful
+// analogue of "two client pods on the singleton engine":
+//
+//	dagger call probe-cache --mode write     # write MARKER_A into cache volume "…-A"
+//	dagger call probe-cache --mode readsame  # read volume "…-A"  (expect MARKER_A → shares)
+//	dagger call probe-cache --mode readdiff  # read volume "…-B"  (expect EMPTY   → isolates)
+//
+// If readsame sees the marker AND readdiff does not, name-based isolation is CONFIRMED (the
+// ADR-0008 §3 claim holds locally); the remaining cross-Project concern is then purely the
+// controller's allocation of distinct names (a control-plane guarantee). LLM-free.
+// (cbb8/d8f0-style spike; to be refactored into workflows/ later — ADR-0010 Consequences.)
+func (m *Dagmar) ProbeCache(ctx context.Context,
+	// which leg of the test to run: write | readsame | readdiff
+	mode string,
+) (string, error) {
+	const (
+		volA   = "dagmar-probecache-A"
+		volB   = "dagmar-probecache-B"
+		marker = "MARKER_A"
+	)
+	mk := func(vol string) *dagger.Container {
+		// Default cache Sharing mode is SHARED — the production behavior; that is what makes
+		// the volume name the sharing/isolation key.
+		return dag.Container().
+			From("alpine:3.20").
+			WithMountedCache("/cache", dag.CacheVolume(vol))
+	}
+	switch mode {
+	case "write":
+		out, err := mk(volA).
+			WithExec([]string{"sh", "-c", "echo " + marker + " > /cache/marker.txt; cat /cache/marker.txt"}).
+			Stdout(ctx)
+		if err != nil {
+			return "", fmt.Errorf("probe-cache write: %w", err)
+		}
+		return fmt.Sprintf("WROTE %q into cache volume %q\n%s", marker, volA, strings.TrimSpace(out)), nil
+	case "readsame":
+		out, err := mk(volA).
+			WithExec([]string{"sh", "-c", "cat /cache/marker.txt 2>/dev/null || echo EMPTY"}).
+			Stdout(ctx)
+		if err != nil {
+			return "", fmt.Errorf("probe-cache readsame: %w", err)
+		}
+		seen := strings.TrimSpace(out)
+		verdict := "SHARES (same name sees the marker) — positive control OK"
+		if seen != marker {
+			verdict = "NO-SHARE (same name did NOT see the marker) — cache is not keyed/persisting by name; test invalid"
+		}
+		return fmt.Sprintf("READ cache volume %q -> %q\nVERDICT: %s", volA, seen, verdict), nil
+	case "readdiff":
+		out, err := mk(volB).
+			WithExec([]string{"sh", "-c", "cat /cache/marker.txt 2>/dev/null || echo EMPTY"}).
+			Stdout(ctx)
+		if err != nil {
+			return "", fmt.Errorf("probe-cache readdiff: %w", err)
+		}
+		seen := strings.TrimSpace(out)
+		verdict := "ISOLATED (different name does NOT see the marker) — ADR-0008 §3 CONFIRMED"
+		if seen == marker {
+			verdict = "LEAK (different name SAW the marker) — ADR-0008 §3 FALSIFIED: cache isolation by name is broken"
+		}
+		return fmt.Sprintf("READ cache volume %q -> %q\nVERDICT: %s", volB, seen, verdict), nil
+	default:
+		return "", fmt.Errorf("probe-cache: unknown mode %q (want write|readsame|readdiff)", mode)
+	}
+}
