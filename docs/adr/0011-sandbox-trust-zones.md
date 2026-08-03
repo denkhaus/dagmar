@@ -67,6 +67,15 @@ A hermetic agent's `Env` withholds the **network-capable tools wholesale**:
 Tools are **tailored per use case** — the agent gets the minimum its role requires, nothing
 more. (The `merge` tool is in **no** Agent's tool-set, ADR-0006.)
 
+> **Carve-out — named Dagger functions ≠ the raw `container` tool (ADR-0012 §4).** The withheld
+> tool is the **raw `container`** tool. A **named Dagger function** the agent calls in-loop —
+> e.g. the checkable wrapper `dagmar-gate`, which internally container-execs build/test/lint —
+> is NOT the raw `container` tool and is therefore NOT withheld. Its container-exec network
+> residual is the §3-accepted residual; the gate body is project-declared (manifest, ADR-0003)
+> and gate-reviewed, and the in-loop run uses a pinned ref, so an injected agent cannot redirect
+> it to arbitrary code. Hermetic coders therefore DO run `dagmar-gate` in-loop (self-verification
+> preserved, CONTEXT.md).
+
 ### 3. The ProbeNet residual risk is a calculated, accepted risk
 
 Tool-set exclusion is **not** a hard network guarantee: a container exec has outbound network

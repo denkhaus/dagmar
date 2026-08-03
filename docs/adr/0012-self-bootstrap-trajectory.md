@@ -1,16 +1,16 @@
 # ADR-0012: Self-bootstrap & dogfooding trajectory
 
 Date: 2026-08-04
-Seed: dagmar-e795 (part of dagmar-80dd) · Status: **PROPOSED (revised — pending re-review or acceptance)**
-Reviewed: `docs/review/10-2026-08-04-c71f6cd-e795.md` (found GAP-1/GAP-2/FIX-1 + SPEC-1/2; this revision
-addresses all of them — see inline "review-10" notes).
+Seed: dagmar-e795 (part of dagmar-80dd) · Status: **ACCEPTED**
+Reviewed: `docs/review/10-2026-08-04-c71f6cd-e795.md` (found GAP-1/GAP-2/FIX-1 + SPEC-1/2; revised),
+`docs/review/11-2026-08-04-8d3e402-e795.md` (found GAP-3 + SPEC-3/4 + HOUSE-5; revised, then accepted).
 
 ## Context
 
 `dagmar-e795` asks: what is the minimal, hand-built core of dagmar that can then take over
 developing itself, and what is the growth trajectory? This fixes the MVP shape and the order
 the rest of the map (the wayfinder `dagmar-80dd` "Not yet specified" menu) resolves in. Decided
-via grilling 2026-08-04; revised after dagmar-review 10.
+via grilling 2026-08-04; revised twice after dagmar-review 10 and 11.
 
 Dogfooding is **structural, not a special case**: os-eco ports are bound per-Project with N+1
 contexts (dagmar-own + each target Project — CONTEXT.md), so dagmar develops itself AS a target
@@ -44,10 +44,10 @@ foundation — de-risked.
 **Phase-0 reads (load-bearing, IN scope — NOT deferred; review-10 GAP-1).** The dispatch
 vertical's controller must provision/read two things earlier sweeps left unspecified: (1) the
 **agent-pod image** — the OCI image the agent pod runs (a dagmar default, overridable per
-Project); without it the pod has nothing to run; (2) the **module ref** — which dagmar module
-version the agent pod invokes, and how it is pointed at the engine on kind. Both are
-MVP-necessary. The ProjectManifest and the os-eco binding remain deferred (NOT needed for the
-dispatch vertical).
+Project; the field home — Project CR vs. ConfigMap — is a control-plane-design detail); without
+it the pod has nothing to run; (2) the **module ref** — which dagmar module version the agent
+pod invokes, and how it is pointed at the engine on kind. Both are MVP-necessary. The
+ProjectManifest and the os-eco binding remain deferred (NOT needed for the dispatch vertical).
 
 **Reconciliation scope (Phase 0 = minimal reconcile; review-10 SPEC-1).** The controller
 observes the agent pod and writes **status conditions** back into the Run-CR — the first
@@ -63,50 +63,64 @@ CRDs are generated from Go types (K8s-standard). It grows incrementally into the
 (webhooks etc. later). Stays on the standard path — no throwaway hand-rolled reconciler, no
 premature full-Kubebuilder heaviness. Matches the "build up step by step" trajectory ethos.
 
-### 4. First earned capability = dagmar's own CI, as Dagger functions (always-Dagger)
+### 4. First earned capability = dagmar's own CI, as always-Dagger wrapper functions
 
 After the dispatch vertical, dagmar earns its **own CI** — the deterministic safety net. The
 gate-family from ADR-0009 §2 is implemented as **Dagger functions**, in the Project's Dagger-SDK
 language:
 
-- **`dagmar-bootstrap`** — the prepare step (dep/tool install).
-- **`dagmar-gate`** — the verify step (build/test/lint).
+- **`dagmar-bootstrap`** — the **prepare** wrapper (dep/tool install), run **once per
+  workspace** before verification (review-11 HOUSE-5).
+- **`dagmar-gate`** — the **verify** wrapper (build/test/lint), run **in-loop** (coder
+  self-verifies) and as the gate.
 
 These names are the **correct lifecycle stages** (retained from ADR-0009); they are now Dagger
 functions, not Justfile targets.
 
-**Always-Dagger — not flexible transport.** An earlier draft of this ADR proposed a flexible,
-manifest-declared transport (a Dagger function for Go, `bun` for TypeScript, `just` for Justfile
-projects). **Dropped.** Dagger SDKs cover every language that matters to dagmar (Go, TypeScript,
-Python, PHP), so a conforming Project always exposes `dagmar-bootstrap` + `dagmar-gate` as
-**Dagger functions** in its own SDK language — no Justfile, no `just`, no language-specific
-wrapper. One mechanism, not a transport matrix.
+**`dagmar-gate` is the WRAPPER, not the checkable (review-11 GAP-3).** The relationship to the
+ProjectManifest (ADR-0003) is preserved exactly: the manifest declares **what** the checkables
+are (its `checkables:` section); `dagmar-gate` is the **always-Dagger execution wrapper** that
+runs them — manifest = *what*, `dagmar-gate` = *how*. `dagmar-gate` does **not** re-declare
+checkables; it consumes the manifest-declared checkables, so the manifest stays authoritative.
+The checkable is manifest-declared; `dagmar-gate` is the wrapper that runs it — **distinct, not
+identical**. (ADR-0003 is untouched by this ADR; only the ADR-0009 §2 wrapper mechanism changes.)
+
+**Always-Dagger — not flexible transport.** An earlier draft proposed a flexible transport (a
+Dagger function for Go, `bun` for TypeScript, `just` for Justfile). **Dropped.** Dagger SDKs
+cover every language that matters to dagmar (Go, TypeScript, Python, PHP), so a conforming
+Project always exposes `dagmar-bootstrap` + `dagmar-gate` as **Dagger functions** in its own SDK
+language — no Justfile, no `just`, no language-specific wrapper. One mechanism.
+
+**Conformance floor (review-11 SPEC-4).** This **strengthens** conformance: a conforming Project
+must be a **Dagger module** exposing `dagmar-bootstrap` + `dagmar-gate` (heavier than a
+Justfile, but the Dagger SDKs make it feasible across Go/TS/Python/PHP). Deliberate — it unifies
+the checkable on one mechanism. External adoption of non-Dagger-native Projects bears this cost;
+for Dagger-native targets it is natural.
 
 The gate-family is **reused** both in **CI** (GitHub Actions, `dagger/dagger-for-github`,
 `dagger call dagmar-gate --source=.`) and **in-loop** (coder self-verification) — CONTEXT.md's
 "reused checkable," now concrete. Order: CI → cognition → housekeeping → features.
 
-**Hermeticity carve-out (review-10 GAP-2).** ADR-0011 §2 withholds the **raw `container` tool**
-from hermetic coders (N6: `container.WithExec()` always has network). `dagmar-gate` is a **named
-Dagger function**, not the raw `container` tool — so it is NOT withheld. The in-loop
-`dagmar-gate` runs build/test/lint via container-exec, whose network residual is **exactly the
-residual ADR-0011 §3 consciously accepts** ("a raw exec path: the in-loop checkable, a build
-step"). Hermetic coders therefore DO run `dagmar-gate` in-loop (self-verification preserved);
-the withheld tool is the raw `container`, not the named gate function. (On acceptance, ADR-0011
-§2 gains a one-line note: the checkable `dagmar-gate` is a named Dagger function, distinct from
-the withheld raw `container` tool.)
+**Hermeticity carve-out (review-10 GAP-2; review-11 SPEC-3).** ADR-0011 §2 withholds the **raw
+`container` tool** from hermetic coders (N6: `container.WithExec()` always has network).
+`dagmar-gate` is a **named Dagger function**, not the raw `container` tool — so it is NOT
+withheld. The in-loop `dagmar-gate` runs build/test/lint via container-exec, whose network
+residual is **exactly the residual ADR-0011 §3 consciously accepts** ("a raw exec path: the
+in-loop checkable, a build step"). Hermetic coders therefore DO run `dagmar-gate` in-loop
+(self-verification preserved). The distinction is threat-model-relevant, not a
+distinction-without-a-difference, because (review-11 SPEC-3): the gate **body** is
+**project-declared** (manifest) and **gate-reviewed** (it IS the deterministic gate, ADR-0009),
+and the in-loop run uses a **pinned ref** of `dagmar-gate` — so an injected agent cannot
+redirect the gate to arbitrary code; the residual is the manifest checkable's own exec, bounded
+by ADR-0007.
 
-> **Consequence (applies ON ACCEPTANCE): ADR-0009 §2 is REASSIGNED, not softened (review-10
-> FIX-1).** §2 currently makes `dagmar-bootstrap`/`dagmar-gate` **Justfile targets** with `just`
-> a mandatory conformance dependency (review 05 B2). The always-Dagger model **reassigns the
-> wrapper mechanism**: Justfile targets → **Dagger functions**. The names `dagmar-bootstrap` /
-> `dagmar-gate` are **retained** (correct lifecycle stages); only the mechanism changes
-> (Justfile → Dagger). §2's `manifest = what` separation is preserved; only the wrapper (how)
-> changes. `just` drops from "mandatory conformance dependency" to **not used**. The conformance
-> requirement **strengthens**: a conforming Project must be a Dagger module exposing these two
-> functions (heavier than a Justfile, but the Dagger SDKs make it feasible across Go/TS/Python/
-> PHP). CONTEXT.md's Tier-A `checkable` glossary is sharpened on acceptance (the checkable IS
-> `dagmar-gate`, a Dagger function; always-Dagger). These edits land at ACCEPTED, not before.
+> **Consequence (APPLIED at acceptance): ADR-0009 §2 is REASSIGNED.** §2 made
+> `dagmar-bootstrap`/`dagmar-gate` **Justfile targets** with `just` a mandatory conformance
+> dependency. The always-Dagger model **reassigns the wrapper mechanism**: Justfile targets →
+> **Dagger functions**. The names are **retained** (correct lifecycle stages); only the mechanism
+> changes (Justfile → Dagger). §2's `manifest = what` separation is preserved (the manifest still
+> declares checkables; ADR-0003 is **untouched**). `just` drops from "mandatory conformance
+> dependency" to **not used**.
 
 ### 5. Growth trajectory = cognition before autonomy (4 phases; productionization alongside)
 
@@ -156,8 +170,12 @@ events dagmar cannot yet handle well is riskier than it is worth.
 - **Flexible checkable transport (Dagger-fn | bun | just per language).** Rejected — Dagger SDKs
   cover Go/TS/Python/PHP, so always-Dagger is feasible and removes the transport matrix entirely.
   `dagmar-bootstrap` / `dagmar-gate` are always Dagger functions.
+- **"`dagmar-gate` IS the checkable" (review-11 GAP-3 draft framing).** Rejected — it would make
+  the manifest `checkables:` section a second source and break ADR-0009 §2's two-layer model.
+  `dagmar-gate` is the wrapper that consumes manifest checkables; the checkable stays
+  manifest-declared (ADR-0003).
 
-## Consequences
+## Consequences (applied at acceptance)
 
 - **Root module** (`github.com/denkhaus/dagmar`) gains content: `api/v1alpha1/` (Project, Run,
   …) + `cmd/dagmar-controller/` (lean controller-runtime). No longer empty (deferred in ADR-0010
@@ -174,12 +192,17 @@ events dagmar cannot yet handle well is riskier than it is worth.
   in-cluster" end-state is recursive (dagmar develops itself inside its own production cluster).
   Bounded by the CI gate-family + ADR-0006 (autonomy earned); noted as a conscious residual, not
   addressed further here.
-- **ADR-0009 §2 reassigned on acceptance** (see §4 consequence): Justfile targets → Dagger
-  functions; `just` not used.
-- **ADR-0011 §2** gains a one-line carve-out note on acceptance (the checkable `dagmar-gate` ≠
-  the withheld raw `container` tool).
-- **CONTEXT.md** checkable glossary sharpened on acceptance (checkable = `dagmar-gate`, a Dagger
-  function; always-Dagger); ADR list gains 0012.
+- **ADR-0009 §2 REASSIGNED** (see §4 consequence): Justfile targets → Dagger functions; `just`
+  not used. (Edit applied to ADR-0009 §2 + Consequences.)
+- **ADR-0011 §2 carve-out note added** (the checkable `dagmar-gate` is a named Dagger function,
+  distinct from the withheld raw `container` tool; its in-loop residual is the §3-accepted
+  residual; gate body project-declared/gate-reviewed, in-loop pinned ref).
+- **ADR-0003 UNTOUCHED** — the manifest still declares checkables (`checkables:` section); only
+  the ADR-0009 §2 wrapper mechanism changes. Listed here for explicitness (review-11 GAP-3).
+- **CONTEXT.md** sharpened: Tier-A `checkable` glossary (the checkable is manifest-declared;
+  `dagmar-gate` is the always-Dagger wrapper that runs it); `ProjectManifest` entry (Justfile
+  target → Dagger function); ADR list gains 0012; ADR-0009 description updated (Justfile gate →
+  Dagger-function gate).
 - **Dogfooding trajectory fixed:** Phase 0 → 1 → 2 → 3, productionization alongside. dagmar
   develops itself as dagmar-own (a registered Project) once Phase 2 lands.
 - **ProbeNet / ProbeCache** (existing spikes) feed Phase 0 (engine + cache-isolation evidence)

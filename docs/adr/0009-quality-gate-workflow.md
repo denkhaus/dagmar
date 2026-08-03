@@ -32,19 +32,23 @@ seeds/ADRs (the latter sharpens ADR-0007).
 
 - The QualityGate is **purely deterministic**. No AI-review inside the gate — that is the
   ReviewAgent's job. "Gate green" = all checkables + rules pass deterministically.
-- The project exposes standardized entry points — concretely **Justfile targets**
+- The project exposes standardized entry points — concretely **Dagger functions**
   `dagmar-bootstrap` (prepare the workspace; install tools/deps) and `dagmar-gate` (run the
-  checkables: build/test/lint + rules/thresholds + static analysis). These are the project's
-  conformance contract for deterministic execution (analogous to the ProjectManifest,
-  ADR-0003).
+  checkables: build/test/lint + rules/thresholds + static analysis), written in the project's
+  Dagger-SDK language. These are the project's conformance contract for deterministic execution
+  (analogous to the ProjectManifest, ADR-0003).
 - **Relationship to the ProjectManifest (ADR-0003):** the manifest declares **what** the
-  checkables are (its `checkables:` section); `dagmar-gate` is the **execution wrapper**
-  that runs them — manifest = *what*, Justfile target = *how to invoke*. `dagmar-gate` does
-  **not** re-declare checkables; it is the single deterministic entry point that consumes
-  the manifest-declared checkables, so the manifest stays authoritative for "the
-  checkables" (no projection ambiguity). This makes **`just` (Justfile) a mandatory runtime
-  tool for every conforming Project** — a conformance dependency introduced here, not in
-  ADR-0003.
+  checkables are (its `checkables:` section); `dagmar-gate` is the **execution wrapper** that
+  runs them — manifest = *what*, Dagger function = *how to invoke*. `dagmar-gate` does **not**
+  re-declare checkables; it is the single deterministic entry point that consumes the
+  manifest-declared checkables, so the manifest stays authoritative for "the checkables" (no
+  projection ambiguity).
+- **Wrapper mechanism reassigned by ADR-0012 §4:** this section originally specified **Justfile
+  targets** and made `just` a mandatory runtime tool. ADR-0012 reassigns the wrapper to
+  **always-Dagger functions** (Dagger SDKs cover Go/TS/Python/PHP, so no Justfile/`just`/`bun`
+  is needed); `just` drops from "mandatory conformance dependency" to **not used**, and
+  conformance strengthens to "the Project is a Dagger module exposing `dagmar-bootstrap` +
+  `dagmar-gate`."
 
 ### 3. Hermetic LLM via the tool-set (trust zone)
 
@@ -134,17 +138,17 @@ unreviewed merges), not a component of every workflow.
 
 ## Consequences
 
-- **Glossary:** `dagmar-bootstrap` / `dagmar-gate` Justfile targets = the project's
-  deterministic gate conformance contract; ReviewAgent = one cognitive role (specialists
-  later); Calibration loop = disagreement → `review-calibration` mixin → co-evolution;
-  post-merge watchdog = filtered safety-net workflow.
-- **Project contract:** a Project must expose `dagmar-bootstrap` and `dagmar-gate` (Justfile
-  targets) as its gate conformance. These **wrap** the manifest-declared checkables
-  (ADR-0003) — manifest = *what*, `dagmar-gate` = *how to run* — so `just` (Justfile) is a
-  mandatory runtime tool for every conforming Project (conformance dependency introduced
-  here, not in ADR-0003).
+- **Glossary:** `dagmar-bootstrap` / `dagmar-gate` **Dagger functions** = the project's
+  deterministic gate conformance contract (reassigned from Justfile targets by ADR-0012 §4);
+  ReviewAgent = one cognitive role (specialists later); Calibration loop = disagreement →
+  `review-calibration` mixin → co-evolution; post-merge watchdog = filtered safety-net workflow.
+- **Project contract:** a Project must expose `dagmar-bootstrap` and `dagmar-gate` as **Dagger
+  functions** (i.e. the Project is a Dagger module). These **wrap** the manifest-declared
+  checkables (ADR-0003) — manifest = *what*, `dagmar-gate` = *how to run*. (Originally Justfile
+  targets with `just` mandatory; reassigned to always-Dagger functions by ADR-0012 §4.)
 - **ADR-0006:** used/confirmed (two-green, veto, Calibration Agent workflow). **ADR-0005:**
-  `review-calibration` mixin composition. **ADR-0003:** Justfile-target gate conformance.
+  `review-calibration` mixin composition. **ADR-0003:** manifest-declared checkables (the
+  *what*); the gate-wrapper mechanism is decided in ADR-0009 §2 / reassigned by ADR-0012 §4.
 - **Spun out (separate seeds/ADRs):** general Workflow-CRD framework; Sandbox trust-zones /
   hermetic-LLM network segmentation (sharpens ADR-0007); Wayfinder Destination update toward
   "Dagger-based software factory".

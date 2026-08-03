@@ -40,8 +40,9 @@ See ADR-0001.
 - **Env** — Dagger environment bundling inputs/outputs/tools for an LLM (`dag.Env()`).
 - **CodeWorkspace** — `CodeWorkspace(source, checkable)`; the Tier-A projection of a
   dagmar Workspace.
-- **checkable** — Dagger's mechanical self-verification (build/test/lint) running
-  in-loop. Defined per-project (in the ProjectManifest) and reused both in-loop (agent
+- **checkable** — the project's mechanical self-verification (build/test/lint), declared
+  per-project in the ProjectManifest (`checkables:`, ADR-0003) and run by the always-Dagger
+  wrapper function `dagmar-gate` (ADR-0009 §2 / ADR-0012 §4). Reused both in-loop (agent
   self-verifies while working) and as the mechanical layer of the QualityGate.
 - **Loop** — `dag.LLM().WithEnv(env).WithPromptFile(prompt).Loop()`; the agent
   cognition loop. A Run drives exactly one Loop.
@@ -116,8 +117,9 @@ dogfooding).
   `.canopy/` store (see ADR-0005). Git-native, versioned with the code; the Project CR
   references it by repo + path. Path/format: `.dagmar/project.yaml` (YAML); the CR has
   no `checkable-source` field — checkables live in the manifest (ADR-0003). The manifest
-  declares **what** the checkables are; the Justfile target `dagmar-gate` (ADR-0009) is the
-  **execution wrapper** that runs them — manifest = *what*, `dagmar-gate` = *how*. Grows
+  declares **what** the checkables are; the Dagger function `dagmar-gate` (ADR-0009 §2 /
+  ADR-0012 §4) is the **execution wrapper** that runs them — manifest = *what*,
+  `dagmar-gate` = *how*. Grows
   via dogfooding.
 
 **Forthcoming (referenced, not yet realized):**
@@ -214,6 +216,7 @@ See `docs/adr/`:
 - **ADR-0006** — Autonomy model (slim axes, deterministic merge, two-green + veto)
 - **ADR-0007** — Credentials & secret management (per-Project namespace, typed secrets, ESO, projected injection)
 - **ADR-0008** — Engine tenancy & Run concurrency (singleton engine, kube-pod:// agent pods + RBAC, per-Project cache volumes)
-- **ADR-0009** — Quality-gate workflow family (deterministic Justfile gate, hermetic LLM via tool-set, gate-before-review, Calibration loop, post-merge watchdog)
+- **ADR-0009** — Quality-gate workflow family (deterministic Dagger-function gate, hermetic LLM via tool-set, gate-before-review, Calibration loop, post-merge watchdog)
 - **ADR-0010** — Go module layout & hexagonal architecture (logic in `.dagger/internal`; functional core; `Dagmar` main object + `New` constructor)
 - **ADR-0011** — Sandbox trust-zones (hermetic LLM via tailored tool-sets; calculated residual risk; one singleton engine unchanged)
+- **ADR-0012** — Self-bootstrap & dogfooding trajectory (kind substrate; dispatch-vertical-first; lean controller-runtime; always-Dagger gate-family `dagmar-bootstrap`/`dagmar-gate`; cognition-before-autonomy)
