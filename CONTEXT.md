@@ -48,7 +48,9 @@ See ADR-0001.
 - **TokenUsage** — Dagger's cost observability (`agent.TokenUsage()`).
 - **Tool** — Dagger configuration: what an agent may call (`dag.git` / `container` /
   `http` plus os-eco adapter exposures). dagmar coins no Tool type; an Agent's
-  permitted tools are its `tool-set` field.
+  permitted tools are its `tool-set` field. A **hermetic** agent = its `tool-set` carries no
+  network-capable tool (`http`, `git` remote, the whole `container` tool) — a *tool-surface*
+  constraint, **not** a network air-gap. See ADR-0011 §2.
 
 ### Tier B — os-eco backing services (adapter ports, bound per-Project)
 
@@ -213,3 +215,5 @@ See `docs/adr/`:
 - **ADR-0007** — Credentials & secret management (per-Project namespace, typed secrets, ESO, projected injection)
 - **ADR-0008** — Engine tenancy & Run concurrency (singleton engine, kube-pod:// agent pods + RBAC, per-Project cache volumes)
 - **ADR-0009** — Quality-gate workflow family (deterministic Justfile gate, hermetic LLM via tool-set, gate-before-review, Calibration loop, post-merge watchdog)
+- **ADR-0010** — Go module layout & hexagonal architecture (logic in `.dagger/internal`; functional core; `Dagmar` main object + `New` constructor)
+- **ADR-0011** — Sandbox trust-zones (hermetic LLM via tailored tool-sets; calculated residual risk; one singleton engine unchanged)

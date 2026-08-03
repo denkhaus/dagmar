@@ -56,13 +56,13 @@ seeds/ADRs (the latter sharpens ADR-0007).
 - Rationale: the LLM processes untrusted content (repo/issues/PRs → prompt-injection risk);
   hermetic prevents exfiltration and tool-install. The full Sandbox trust-zone model is a
   separate ADR (it sharpens ADR-0007's encapsulation boundary).
-- **Capability-boundary dependency (GAP):** "excludes any network-capable tool" is the
-  *principle*, not a pinned surface — the Tool glossary lists `container` and `git` as
-  network-capable, and whether those (or only `http`) are withheld for hermetic agents — and
-  whether hermeticity is additionally enforced by a Sandbox-pod NetworkPolicy — is defined by
-  the **forthcoming Sandbox trust-zone ADR** (→ seed `dagmar-911b`; the most consequential
-  missing ADR — review 2026-08-01-mache §C1). ADR-0009 asserts the enforcement *mechanism
-  class* (tool-set exclusion), not the resolved per-tool boundary.
+- **Capability-boundary dependency (RESOLVED by ADR-0011):** the per-tool boundary is now
+  pinned — hermetic agents withhold the network-capable tools wholesale (`http`, `git` remote
+  ops, the **entire** `container` tool, since `container.WithExec()` always has network). The
+  enforcement mechanism is the tool-set (as asserted here); no Sandbox-pod NetworkPolicy is
+  added (a "two-engines bell" was considered in ADR-0011 and rejected). Note: "no network" here
+  is a *tool-surface* statement (no network-capable tool on the `Env`), not a literal air-gap —
+  see ADR-0011 §2/§3 for the precise term and the accepted residual.
 
 ### 4. Decision flow — gate-before-review, revise loop, max-N termination
 

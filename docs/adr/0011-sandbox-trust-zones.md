@@ -1,7 +1,9 @@
 # ADR-0011: Sandbox trust-zones — hermetic LLM via tailored tool-sets (calculated risk)
 
 Date: 2026-08-03
-Seed: dagmar-911b (part of dagmar-80dd) · Status: **PROPOSED (draft — pending review)**
+Seed: dagmar-911b (part of dagmar-80dd) · Status: **ACCEPTED**
+Reviewed: `docs/review/07-2026-08-02-a1441a5-911b.md` (bell draft → rejected),
+`docs/review/08-2026-08-03-4206601-911b.md` (this decision → accepted with sharpening N1–N6).
 
 ## Context
 
@@ -21,9 +23,8 @@ the network regardless of which `dag.*` tools are on the agent's `Env`.
 An earlier draft of this ADR proposed a **"bell"** — two cluster-level Dagger engines by
 trust-zone (`engine-hermetic` with a deny-all-except-provider NetworkPolicy vs.
 `engine-networked`), enforcing hermeticity at the network layer independent of the tool-set.
-That draft was reviewed (`docs/review/07-2026-08-02-a1441a5-911b.md`) and **rejected** (see
-Alternatives): the bell's harder isolation came at operational cost that did not pay for
-itself.
+That draft was reviewed (`docs/review/07-…`) and **rejected** (see Alternatives): the bell's
+harder isolation came at operational cost that did not pay for itself.
 
 ## Decision
 
@@ -40,40 +41,75 @@ per-Run engine routing. ADR-0008 is not re-opened.
 
 ### 2. Hermeticity = tailored tool-sets (least privilege)
 
-A hermetic agent's `Env` carries **no network-capable tool**. The Tool glossary (CONTEXT.md)
-lists `dag.git` / `container` / `http`; for a hermetic agent the tool-set withholds the
-network-capable ones (`http`, `git` remote operations, `container` egress) and exposes only
-what the use case needs. **Tools are tailored per use case** — the agent gets the minimum
-tool-set its role requires, nothing more. (The `merge` tool is in **no** Agent's tool-set,
-ADR-0006.)
+> **Terminology (review N2):** in dagmar, a "hermetic" agent means its tool-set carries **no
+> network-capable tool** — a *tool-surface* constraint. It is **not** a network-level air-gap
+> (there is no per-exec no-network mechanism; see §3). "Hermetic" = the LLM is not *handed* a
+> tool it can call to reach the network, not that no network path exists anywhere in the
+> Sandbox. Readers must not over-trust "hermetic" as "cannot reach the network under any path."
+
+**Criterion — which agents are hermetic (review N3):** the **cognitive LLM-loop agents**
+(coder, ReviewAgent — the agents that process untrusted content and drive a
+`dag.LLM().Loop()`) are hermetic. The **deterministic infrastructure steps**
+(`dagmar-bootstrap`, `dagmar-gate`) are **not** hermetic — they need network (dep install,
+registry pulls). This mirrors ADR-0009 §3's two profiles and is the rule applied when
+materializing an Agent CRD `tool-set`.
+
+A hermetic agent's `Env` withholds the **network-capable tools wholesale**:
+
+- **`http`** — always network; withheld entirely.
+- **`git`** — Dagger's `dag.git` is *remote*-git (clone/fetch/push to a URL); withheld. (A
+  local `git` inside a workspace would run via `container` exec — moot, see next.)
+- **the entire `container` tool** — because `container.WithExec()` always has outbound network
+  (ProbeNet); there is **no "container minus egress" lever** (review N6), so the tool is
+  withheld as a whole, not just "its egress." A hermetic agent therefore cannot run local
+  containers; that is acceptable — hermetic agents are LLM-loop agents, not container-runners.
+
+Tools are **tailored per use case** — the agent gets the minimum its role requires, nothing
+more. (The `merge` tool is in **no** Agent's tool-set, ADR-0006.)
 
 ### 3. The ProbeNet residual risk is a calculated, accepted risk
 
 Tool-set exclusion is **not** a hard network guarantee: a container exec has outbound network
-by default, and an injected instruction could in principle reach the network via a raw exec
-path (the in-loop checkable, a build step) — independent of the `Env` tool-set. We **accept**
-this residual risk, because:
+by default (ProbeNet), and an injected instruction could in principle reach the network via a
+raw exec path (the in-loop checkable, a build step) — independent of the `Env` tool-set. We
+**accept** this residual, deliberately.
 
-- **The primary threat is controlled.** The threat model is *the LLM primitive itself
-  exfiltrating via its own tools* (prompt-injection → the agent calls `http`/`git` to leak).
-  The tailored tool-set removes exactly those tools from the hermetic agent's `Env`, so the
-  LLM cannot exfiltrate through the tool-surface it is given.
-- **The blast radius of any escape is bounded** by ADR-0007's defense-in-depth: per-Project
-  namespace + a per-Run projected-secret subset + the `llm` key never in any tool-set. A
-  Sandbox escape bounds to one Project's credentials.
-- **The residual path is deterministic / project-controlled.** The in-loop checkable
-  (build/test/lint) is declared in the ProjectManifest (ADR-0003) and reviewed at the gate;
-  it is not arbitrary agent-authored shell.
+**Threat model — explicit scope (review N1).** "Calculated" is honest only if the scope is
+named:
+
+- **In scope, and controlled — the LLM primitive exfiltrating via its own tools.**
+  Prompt-injection → the agent calls a tool to leak. The tailored tool-set removes exactly the
+  network-capable tools, and the per-Project `llm` credential key (ADR-0007) is in **no**
+  Agent's tool-set — so the LLM can neither exfiltrate through the surface it is given nor leak
+  its own cognition key. *(Primary-threat control = tool-set + key isolation.)*
+- **In scope, and accepted as residual — the raw-exec path reaching the network.** The in-loop
+  checkable / a build step can reach the network despite the tool-set. Its blast radius is
+  bounded by ADR-0007's defense-in-depth — a per-Project namespace + a per-Run projected-secret
+  subset — so an escape is confined to one Project's credentials. *(Residual bound =
+  namespace + projection; distinct from the primary control above — review N4.)* The checkable
+  is deterministic and declared in the ProjectManifest (ADR-0003); a Project that declares a
+  checkable which curls out compromises only **its own** namespace — the gate *runs* the
+  checkable but does not *inspect* its network behavior; the security boundary is the
+  per-Project namespace, not the gate (review N5, closes the draft's Open §3c).
+- **Out of scope (named, not addressed here) — a Dagger Sandbox isolation break.** A
+  container/process escape that defeats Sandbox encapsulation itself on the shared engine. The
+  rejected "bell" would have contained this at the network layer; under the tool-set model it
+  is a lower-probability residual, still bounded by ADR-0007's namespace, accepted *as a
+  separate residual* — it is not covered by the tool-set. Naming it keeps the acceptance from
+  over-claiming completeness.
 
 This is a deliberate **calculated risk**, not an oversight: harder isolation (the bell) was
-considered and rejected (§Alternatives).
+considered and rejected (§Alternatives); the out-of-scope residual (Sandbox-isolation break)
+is named rather than implied.
 
 ### 4. Per-tool boundary (resolves ADR-0009 §3's open question)
 
 ADR-0009 §3 deferred the per-tool boundary to this ADR. It is now defined: **hermetic agents
-exclude the network-capable tools** (`http`, `git` remote ops, `container` egress) from their
-`Env`; the exact minimal set per Agent role is the Agent CRD's `tool-set` field (CONTEXT.md).
-The mechanism class is the tool-set (as ADR-0009 §3 asserted); the surface is now pinned.
+withhold the network-capable tools wholesale** — `http`, `git` (remote operations), and the
+**entire `container` tool** (review N6 — `container.WithExec()` always has network; there is
+no egress-free sub-lever) — from their `Env`. The exact minimal set per Agent role is the
+Agent CRD's `tool-set` field (CONTEXT.md). The mechanism class is the tool-set (as ADR-0009 §3
+asserted); the surface is now pinned.
 
 ## Alternatives considered
 
@@ -94,7 +130,8 @@ The mechanism class is the tool-set (as ADR-0009 §3 asserted); the surface is n
     exfiltration threat the bell meant to neutralize.
 
   The bell trades four real operational gaps for one residual risk (ProbeNet) that tailored
-  tool-sets + ADR-0007 already bound. Not worth it.
+  tool-sets + ADR-0007 already bound. Not worth it. (Review 08 confirmed G1–G4 evaporate under
+  the single-engine tool-set decision.)
 - **Per-exec no-network flag in Dagger.** Not available in v0.21.8 (`ContainerWithExecOpts`
   has no network field); not a lever today. Revisit if Dagger adds one.
 - **Singleton engine + image-baked deps (deny all egress).** Rejected — forces every Project
@@ -105,27 +142,17 @@ The mechanism class is the tool-set (as ADR-0009 §3 asserted); the surface is n
 ## Consequences
 
 - **ADR-0008: unchanged** — one singleton engine; no trust-zone split, no re-open.
-- **ADR-0009 §3: resolved** — the tool-set IS the hermeticity mechanism (as asserted); the
-  per-tool boundary is now pinned (network-capable tools withheld from hermetic agents). The
-  §3 forward-pointer to "the forthcoming trust-zone ADR" lands here.
-- **CONTEXT.md: unchanged** — `Sandbox` gains no trust-zone field; `Tool` glossary unchanged
-  (tool-set = capability, per ADR-0009 §3). No "two engines" wording to go stale (the H1
-  housekeeping note from review 07 does not apply).
+- **ADR-0009 §3: resolved.** The tool-set IS the hermeticity mechanism (as asserted); the
+  per-tool boundary is pinned (§4). Note (review N8): ADR-0009 §3's phrase "no network" is, in
+  light of this ADR, a *tool-surface* statement (no network-capable tool on the `Env`), not a
+  literal network air-gap — the precise term is "hermetic" as defined in §2.
+- **CONTEXT.md:** `Sandbox` gains no trust-zone field; the **"hermetic" term is sharpened**
+  (review N2 — see the §2 Terminology note, mirrored in the Tool glossary). `Tool` glossary
+  otherwise unchanged (tool-set = capability).
 - **ProbeNet:** retained as the **residual-risk evidence** — the fact that grounds the
   calculated-risk acceptance, not a call for a bell.
-- **The calculated-risk acceptance is explicit** — documented here so it is a conscious
-  decision, not an oversight, and is not re-litigated without new threat information.
+- **The calculated-risk acceptance is explicit** — scope named in §3 (incl. the out-of-scope
+  Sandbox-isolation-break residual), so it is a conscious decision, not an oversight, and is
+  not re-litigated without new threat information.
 - **Deferred:** the exact per-Agent minimal tool-sets (Agent CRD `tool-set` values); a future
   hard-isolation mechanism if Dagger adds per-exec network control or the threat model changes.
-
-## Open during review (this draft's derivations — please confirm or correct)
-
-- **§3(b):** reliance on ADR-0007's blast-radius bound as the compensating control for the
-  residual risk — is that the right framing of "calculated"?
-- **§3(c):** "the checkable is deterministic / project-controlled" — does this adequately
-  bound the raw-exec exfiltration path? A malicious Project could declare a checkable that
-  curls out; is that accepted as that Project's own compromise, or does the gate need to
-  inspect checkable changes?
-- **§4 / §2:** the withheld-tools granularity — is "container egress" the right cut, or is
-  the whole `container` tool withheld from hermetic agents (losing legitimate local-container
-  use)?
