@@ -38,7 +38,7 @@ agent pods use a **ServiceAccount with a Role granting `pods/exec`** on the engi
 
 The singleton engine has one shared cache store; Dagger isolates cache by **volume
 name**. The controller allocates **distinct cache-volume names per Project**, which gives
-cross-Project cache isolation (Research Q1). Cache poisoning across Projects is prevented
+cross-Project cache isolation (Research Q1 — validated locally 2026-08-03; see Consequences). Cache poisoning across Projects is prevented
 as long as Projects never share a cache-volume name.
 
 ### 4. Namespaces = mandatory per Project (per ADR-0007) — defense in depth
@@ -80,12 +80,16 @@ design.
   top (defense in depth: namespace boundary + Sandbox encapsulation).
 - **Operations:** the controller must provision, per Project, (a) a ServiceAccount + a
   `pods/exec` RoleBinding to the engine pod, and (b) a distinct cache-volume name space.
-- **Validated (Research Q1):** cache isolation by volume name was empirically confirmed
-  2026-08-03 (seed `dagmar-d8f0`) via the `ProbeCache` spike (`.dagger/main.go`) — three
-  separate `dagger call` client sessions against one engine showed a same-named volume
-  SHARES the marker (positive control) while a differently-named volume does NOT (ISOLATED).
-  The engine-level mechanic is topology-agnostic (holds for local and `kube-pod://` clients
-  alike); the remaining cross-Project concern is purely the controller allocating distinct
-  cache-volume names per Project (the control-plane guarantee above).
+- **Validated (Research Q1, local engine):** cache isolation by volume name was empirically
+  confirmed 2026-08-03 (seed `dagmar-d8f0`) via the `ProbeCache` spike (`.dagger/main.go`) —
+  three separate `dagger call` client sessions against ONE **local** engine showed a
+  same-named volume SHARES the marker (positive control) while a differently-named volume
+  does NOT (ISOLATED). The cache *identity* is engine-side (the store keys by volume name,
+  transport-independent), so the result is a sound basis for the planned single name-keyed
+  store topology — but the `kube-pod://` client path was **not directly exercised** here
+  (an in-cluster kind test remains available as Tier 2, not strictly required). Note what
+  this validates and what it does not: the **engine mechanic** (name = identity key), not
+  the controller's per-Project name allocation — the remaining cross-Project concern stays
+  the control-plane guarantee above (distinct names per Project).
 - **Deferred:** concurrent-Runs-on-one-Task policy and Workspace-lineage sequencing
   (control-plane design).

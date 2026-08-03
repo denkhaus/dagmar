@@ -314,8 +314,10 @@ func (m *Dagmar) ProbeCache(ctx context.Context,
 		marker = "MARKER_A"
 	)
 	mk := func(vol string) *dagger.Container {
-		// Default cache Sharing mode is SHARED — the production behavior; that is what makes
-		// the volume name the sharing/isolation key.
+		// The volume NAME is always the cache identity key (in every sharing mode); SHARED is
+		// only the concurrency semantics for concurrent access. SHARED (the production default)
+		// is chosen here deliberately: observing isolation under the MOST permissive mode is the
+		// strongest case, not the weakest.
 		return dag.Container().
 			From("alpine:3.20").
 			WithMountedCache("/cache", dag.CacheVolume(vol))
