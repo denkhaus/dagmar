@@ -5,6 +5,7 @@
 # default workspace; only the controller-gen recipes need GOWORK=off.
 
 controller-tools-version := "v0.21.0"
+engine-version := "0.21.8"
 bin-dir := justfile_directory() / "bin"
 
 # install controller-gen into bin/ if missing (go-install-tool idiom)
@@ -21,13 +22,24 @@ manifests: controller-gen
 generate: controller-gen
     GOWORK=off {{bin-dir}}/controller-gen object paths="./..."
 
+# deploy the singleton Dagger engine into the current cluster (PREREQUISITE for Runs — engine
+# management is NOT reconciled by the Phase-0 controller; ADR-0012 §2). cbb8 helm recipe:
+# oci://registry.dagger.io/dagger-helm, image.tag=v0.21.8, privileged=true, namespace dagmar.
+deploy-engine:
+    helm upgrade --install --create-namespace \
+        --namespace dagmar \
+        --set image.tag=v{{engine-version}} \
+        --set privileged=true \
+        dagger oci://registry.dagger.io/dagger-helm
+    kubectl rollout status daemonset/dagger-dagger-helm-engine -n dagmar --timeout=540s
+
 # install CRDs into the current cluster
 install: manifests
     kustomize build config/crd | kubectl apply -f -
 
 # apply the sample Project(dagmar-own) + Run into the current cluster
 apply-samples:
-    kubectl apply -f config/samples/
+    kubectl apply -f config/samples/dagmar_v1alpha1_project.yaml -f config/samples/dagmar_v1alpha1_run.yaml
 
 # run the controller locally against the current cluster's kubeconfig
 run: manifests
@@ -47,8 +59,8 @@ fmt:
 docker-build img="dagmar/controller:dev":
     docker build -t {{img}} .
 
-# deploy the controller into the kind cluster (Increment 2)
+# deploy the controller into the current cluster (Increment 2 — kind/docker-desktop)
 deploy img="dagmar/controller:dev": docker-build
-    -kind load docker-image {{img}} --name dagmar
+    -kind load docker-image {{img}} --name dagmar 2>/dev/null || true
     cd config/manager && kustomize edit set image controller={{img}}
     kustomize build config/default | kubectl apply -f -

@@ -214,9 +214,15 @@ func agentPodFor(run *v1alpha1.Run, project *v1alpha1.Project, enginePod, podNam
 		image = project.Spec.AgentPodImage
 	}
 	runnerHost := fmt.Sprintf("kube-pod://%s?namespace=%s", enginePod, engineNamespace)
+	// Install kubectl + the dagger CLI (downloaded directly from the GitHub release tarball — the
+	// `dl.dagger.io | sh` install script is unreliable from inside a pod: it 403s under some
+	// networks). Then run `dagger call -m <moduleRef> <fn> <args>` against the singleton engine
+	// via kube-pod://. The engine fetches the module server-side from the git ref.
 	cmd := fmt.Sprintf(
-		`apk add --no-cache kubectl curl && DAGGER_VERSION=%s curl -fsSL https://dl.dagger.io | sh && dagger call -m %s %s %s`,
-		daggerVersion, project.Spec.ModuleRef, run.Spec.ModuleFunction, shellJoin(run.Spec.ModuleArgs),
+		`apk add --no-cache kubectl curl && `+
+			`curl -fsSL https://github.com/dagger/dagger/releases/download/v%s/dagger_v%s_linux_amd64.tar.gz | tar xz -C /usr/local/bin dagger && `+
+			`dagger call -m %s %s %s`,
+		daggerVersion, daggerVersion, project.Spec.ModuleRef, run.Spec.ModuleFunction, shellJoin(run.Spec.ModuleArgs),
 	)
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{

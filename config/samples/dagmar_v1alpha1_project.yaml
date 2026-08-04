@@ -9,3 +9,7 @@ spec:
   # as the control plane grows.
   repo: https://github.com/denkhaus/dagmar
   agentPodImage: alpine:3.20
+  # moduleRef: the dagmar module the agent pod invokes via `dagger call -m <ref>` (ADR-0012 §2
+  # GAP-1, load-bearing Phase-0 read). The engine fetches the module server-side from this git
+  # ref; the pushed repo at main carries probe-net. Dogfood: dagmar calls its own published self.
+  moduleRef: github.com/denkhaus/dagmar
