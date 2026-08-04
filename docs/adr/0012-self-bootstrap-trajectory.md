@@ -30,6 +30,13 @@ cluster → wire triggers → once stable, **develop further in-cluster** (deepe
 root module (`github.com/denkhaus/dagmar`, empty per ADR-0010 §1) gets its content now: CRD
 types (`api/v1alpha1/`) + controller.
 
+> **Proven-equivalent dev substrate (review-13 HOUSE-1):** the Phase-0 dispatch vertical was
+> empirically proven (2026-08-04) on **docker-desktop** Kubernetes, not kind — chosen for live
+> `k9s` inspection. The decision stays **kind** (the proven-reliable spike host); docker-desktop
+> is a proven-equivalent dev substrate. The dispatch path (CRD → controller → agent pod →
+> `kube-pod://`) is **substrate-agnostic**, so this does not revise the decision — only records
+> what was actually exercised.
+
 ### 2. Bootstrap boundary (first vertical) = the dispatch vertical, without LLM
 
 The first end-to-end vertical proves the genuinely-new, unbuilt part: **control-plane glue.**
@@ -207,10 +214,20 @@ events dagmar cannot yet handle well is riskier than it is worth.
   develops itself as dagmar-own (a registered Project) once Phase 2 lands.
 - **ProbeNet / ProbeCache** (existing spikes) feed Phase 0 (engine + cache-isolation evidence)
   and Phase 1 (the gate's build/test/lint run via container exec).
+- **Private module refs need ENGINE-level git creds (review-13 GAP-5):** the engine fetches the
+  module server-side from the git ref (`dagger call -m github.com/…`) and is **unauthenticated**.
+  For the Phase-0 smoke the dogfood module `github.com/denkhaus/dagmar` was flipped **public**.
+  A *private* module ref needs **engine-level** git credentials (or an authenticated module
+  mirror) — a mechanism DISTINCT from ADR-0007 §5's Sandbox-scoped `vcs` projection (which
+  authenticates the Workspace clone/push inside the agent pod, not the engine's module fetch).
+  This is **not** a Phase-0 defect (the dogfood module is public); it is recorded here so it is
+  not rediscovered when a private module is first needed. Tracked under `dagmar-67bc`.
 
 ## Deferred to the control-plane-design seed (filed out of Phase 0)
 
 Dispatch concurrency, Workspace-lineage sequencing, webhook admission, the controller's full
-reconciliation semantics (requeue/error-backoff/finalizers), and the agent-pod-image /
-module-ref provisioning details beyond the Phase-0 MVP reads. This ADR fixes the *trajectory and
-fidelity*, not those internals.
+reconciliation semantics (requeue/error-backoff/finalizers), the agent-pod-image /
+module-ref provisioning details beyond the Phase-0 MVP reads, multi-namespace agent-identity
+lifecycle (the per-namespace SA + engine-ns Role/RoleBinding are shared and only bound to the
+FIRST Run's namespace today — review-13 GAP-2/3), and **engine-level git credentials for private
+module refs** (review-13 GAP-5). This ADR fixes the *trajectory and fidelity*, not those internals.

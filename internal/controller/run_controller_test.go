@@ -169,6 +169,36 @@ func TestReconcile_EmptyModuleRefIsTerminalFailed(t *testing.T) {
 	}
 }
 
+func TestReconcile_EmptyModuleFunctionIsTerminalFailed(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = v1alpha1.AddToScheme(scheme)
+	// Run with an empty ModuleFunction (review-13 HOUSE-4: symmetric with ModuleRef).
+	run := &v1alpha1.Run{
+		ObjectMeta: metav1.ObjectMeta{Name: "no-fn", Namespace: "default"},
+		Spec:       v1alpha1.RunSpec{ProjectRef: "dagmar-own", ModuleFunction: ""},
+	}
+	project := &v1alpha1.Project{
+		ObjectMeta: metav1.ObjectMeta{Name: "dagmar-own", Namespace: "default"},
+		Spec:       v1alpha1.ProjectSpec{Repo: "x", ModuleRef: testModuleRef},
+	}
+	cl := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&v1alpha1.Run{}).WithObjects(project, run).Build()
+	r := &RunReconciler{Client: cl, Scheme: scheme}
+
+	res, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Name: "no-fn", Namespace: "default"}})
+	if err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if res.Requeue || res.RequeueAfter != 0 {
+		t.Errorf("empty ModuleFunction must be terminal, got requeue %+v", res)
+	}
+	updated := &v1alpha1.Run{}
+	_ = cl.Get(context.Background(), types.NamespacedName{Name: "no-fn", Namespace: "default"}, updated)
+	if updated.Status.Phase != v1alpha1.RunPhaseFailed {
+		t.Errorf("status phase = %q, want Failed (ModuleFunctionRequired)", updated.Status.Phase)
+	}
+}
+
 func TestReconcile_EngineNotReadyRequeues(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = clientgoscheme.AddToScheme(scheme)

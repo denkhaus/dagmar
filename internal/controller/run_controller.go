@@ -94,6 +94,14 @@ func (r *RunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 			"Project.Spec.ModuleRef is empty; it must name the dagmar module ref for `dagger call -m`")
 	}
 
+	// 3b. ModuleFunction is the other load-bearing Phase-0 read: the function the agent pod calls.
+	// Empty → terminal config error (symmetric with ModuleRef; review-13 HOUSE-4 — otherwise the
+	// pod runs `dagger call -m <ref>` with no function and fails at runtime, mirrored opaquely).
+	if run.Spec.ModuleFunction == "" {
+		return ctrl.Result{}, r.failRun(ctx, run, "ModuleFunctionRequired",
+			"Run.Spec.ModuleFunction is empty; it must name the module function for `dagger call`")
+	}
+
 	// 4. Resolve the singleton engine pod (a Ready one). Transiently absent (engine still rolling
 	// out) → requeue, not terminal.
 	enginePod, err := r.enginePodName(ctx)
@@ -115,9 +123,14 @@ func (r *RunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		return ctrl.Result{}, err
 	}
 
-	// 6. Mirror the pod phase into the Run status + record the pod name.
-	return ctrl.Result{}, r.setStatus(ctx, run, podPhaseToRunPhase(pod.Status.Phase), "Reconciling",
-		"agent pod observed", runConditionStatus(pod.Status.Phase))
+	// 6. Mirror the pod phase into the Run status + record the pod name. A distinct reason on the
+	// terminal failure path (review-13 HOUSE-3) — "Reconciling" was misleading for a Failed pod.
+	reason, message := "Reconciling", "agent pod observed"
+	if pod.Status.Phase == corev1.PodFailed {
+		reason, message = "AgentPodFailed", "agent pod exited non-zero"
+	}
+	return ctrl.Result{}, r.setStatus(ctx, run, podPhaseToRunPhase(pod.Status.Phase), reason, message,
+		runConditionStatus(pod.Status.Phase))
 }
 
 // enginePodName lists a Ready singleton engine pod and returns its name.
@@ -155,12 +168,16 @@ func (r *RunReconciler) ensureAgentIdentity(ctx context.Context, run *v1alpha1.R
 		return fmt.Errorf("get agent SA: %w", err)
 	}
 
-	// Role in the engine namespace granting pods/exec on pods there.
+	// Role in the engine namespace granting the agent SA the minimum kube-pod:// needs: exec into
+	// the engine pod (pods/exec: create) + resolve it (pods: get). Two separate rules — NOT the
+	// cartesian product `pods,pods/exec: create,get`, which would also grant `create` on bare `pods`
+	// (letting the SA create arbitrary pods in the engine ns). Review-13 SPEC-2 least-privilege fix.
 	role := &rbacv1.Role{ObjectMeta: metav1.ObjectMeta{Name: agentRole, Namespace: engineNamespace}}
 	if err := r.Get(ctx, client.ObjectKeyFromObject(role), role); errors.IsNotFound(err) {
-		role.Rules = []rbacv1.PolicyRule{{
-			APIGroups: []string{""}, Resources: []string{"pods", "pods/exec"}, Verbs: []string{"create", "get"},
-		}}
+		role.Rules = []rbacv1.PolicyRule{
+			{APIGroups: []string{""}, Resources: []string{"pods/exec"}, Verbs: []string{"create"}},
+			{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get"}},
+		}
 		if err := r.Create(ctx, role); err != nil && !errors.IsAlreadyExists(err) {
 			return fmt.Errorf("create agent Role: %w", err)
 		}
@@ -218,6 +235,13 @@ func agentPodFor(run *v1alpha1.Run, project *v1alpha1.Project, enginePod, podNam
 	// `dl.dagger.io | sh` install script is unreliable from inside a pod: it 403s under some
 	// networks). Then run `dagger call -m <moduleRef> <fn> <args>` against the singleton engine
 	// via kube-pod://. The engine fetches the module server-side from the git ref.
+	//
+	// SHELL-INJECTION NOTE (review-13 GAP-1): this `sh -c` string interpolates THREE unescaped,
+	// unquoted author fields — ModuleRef (Project CR), ModuleFunction (Run CR), and ModuleArgs
+	// (Run CR, via shellJoin). All three are privileged-author fields (creating a Run/Project needs
+	// RBAC), so a shell-metacharacter (;, $(), backtick) or even a space would be interpolated raw
+	// but is author-self-inflicted in Phase 0. This becomes a LIVE injection vector for
+	// agent-generated Runs (Phase 2) — the call shape must be built without a shell then.
 	cmd := fmt.Sprintf(
 		`apk add --no-cache kubectl curl && `+
 			`curl -fsSL https://github.com/dagger/dagger/releases/download/v%s/dagger_v%s_linux_amd64.tar.gz | tar xz -C /usr/local/bin dagger && `+
@@ -291,7 +315,9 @@ func runConditionStatus(p corev1.PodPhase) metav1.ConditionStatus {
 }
 
 // shellJoin joins args into a shell argument string (Phase 0 spike; no escaping — ModuleArgs are
-// author-controlled via the Run CR, a privileged resource. Revisit for Phase 2 untrusted input.)
+// shellJoin joins ModuleArgs into a shell argument string. See the SHELL-INJECTION NOTE on
+// agentPodFor: this is one of THREE unescaped interpolation sites (ModuleRef, ModuleFunction,
+// ModuleArgs) — all author-controlled in Phase 0; revisit for Phase 2 agent-generated Runs.
 func shellJoin(args []string) string {
 	return strings.Join(args, " ")
 }
