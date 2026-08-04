@@ -11,9 +11,10 @@ import (
 	"dagger/dagmar/internal/dagger"
 )
 
-// gateImage is the Go toolchain the gate runs checkables in. dagmar-own's modules are go 1.26.x;
-// golang:1.26 covers both (root 1.26.1, .dagger 1.26.5).
-const gateImage = "golang:1.26"
+// gateImage is the Go toolchain the gate runs checkables in. Pinned to a specific minor for
+// reproducibility (review-14 GAP-3); 1.26.5 satisfies both dagmar modules (root go 1.26.1,
+// .dagger go 1.26.5). Bump deliberately when the modules' go directive advances.
+const gateImage = "golang:1.26.5"
 
 // Gate is dagmar-gate: the always-Dagger verify wrapper that runs the manifest-declared
 // checkables (ADR-0003 = what, gate = how — review-11 GAP-3). It reads `.dagmar/project.yaml`
@@ -61,8 +62,12 @@ func runCheckable(ctx context.Context, source *dagger.Directory, c config.Checka
 	for k, v := range c.Env {
 		ctr = ctr.WithEnvVariable(k, v)
 	}
-	// Append an exit-code marker; ReturnTypeAny keeps the exec from erroring on non-zero.
-	cmd := c.Command + `; echo "DAGMAR_EXIT=$?"`
+	// Merge stderr into stdout for the WHOLE command chain (Go toolchain diagnostics —
+	// build/vet/test errors — go to stderr; review-14 FIX-1). `exec 2>&1` redirects the shell's
+	// fd 2→1 for the rest of the script (a bare trailing `2>&1` would bind only to the last `&&`
+	// command). Then append the exit-code marker. ReturnTypeAny keeps the exec from erroring on
+	// non-zero, so a failing checkable's "why" reaches the abort message.
+	cmd := `exec 2>&1; ` + c.Command + `; echo "DAGMAR_EXIT=$?"`
 	out, err := ctr.WithExec([]string{"sh", "-c", cmd},
 		dagger.ContainerWithExecOpts{Expect: dagger.ReturnTypeAny}).Stdout(ctx)
 	if err != nil {
@@ -72,17 +77,20 @@ func runCheckable(ctx context.Context, source *dagger.Directory, c config.Checka
 	return out, exit, nil
 }
 
-// parseDagmarExit extracts the trailing "DAGMAR_EXIT=<n>" marker's value; defaults to 1 (fail)
-// if absent (the command did not reach the echo — treat as failure).
+// parseDagmarExit extracts the exit code from the LAST "DAGMAR_EXIT=<n>" marker in the output
+// (review-14 FIX-2 — the LAST one is the real marker after the command chain; an earlier literal
+// line in the command's own output must not mask a real failure as pass). Defaults to 1 (fail) if
+// no marker is present (the command did not reach the echo — treat as failure).
 func parseDagmarExit(out string) int {
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "DAGMAR_EXIT=") {
-			n := 0
-			if _, err := fmt.Sscanf(line, "DAGMAR_EXIT=%d", &n); err == nil {
-				return n
-			}
+	last := -1
+	for _, line := range strings.Split(out, "\n") {
+		var n int
+		if _, err := fmt.Sscanf(strings.TrimSpace(line), "DAGMAR_EXIT=%d", &n); err == nil {
+			last = n
 		}
 	}
-	return 1
+	if last < 0 {
+		return 1
+	}
+	return last
 }

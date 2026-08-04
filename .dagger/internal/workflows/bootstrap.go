@@ -14,7 +14,13 @@ import (
 // Bootstrap is dagmar-bootstrap: the prepare wrapper run once per workspace before verification
 // (HOUSE-5). For a Go project it resolves + warms module dependencies (`go mod download`) in each
 // of the manifest checkables' workdirs — proving deps resolve and populating the build cache. It
-// does not itself verify (that is dagmar-gate); it prepares. Reused alongside dagmar-gate in CI.
+// does not itself verify (that is dagmar-gate); it prepares.
+//
+// CI note (review-14 HOUSE-1): for dagmar-own the gate is self-sufficient (Go's `go build`
+// resolves deps inline), so .github/workflows/ci.yml invokes only dagmar-gate. dagmar-bootstrap
+// exists as the lifecycle PREPARE step and is worth running before the gate for Projects whose
+// prepare is expensive (codegen, protoc, heavy dep trees) — it is available, just not required
+// for Go's gate.
 func Bootstrap(ctx context.Context, source *dagger.Directory) (string, error) {
 	raw, err := source.File(".dagmar/project.yaml").Contents(ctx)
 	if err != nil {

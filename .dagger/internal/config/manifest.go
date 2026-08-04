@@ -1,13 +1,12 @@
-// ProjectManifest types + parsing for the in-repo conformance contract (ADR-0003).
-//
-// This file is PURE: it defines the manifest schema and parses YAML, with no Dagger import, so it
-// is unit-testable without an engine. Reading the manifest bytes out of a *dagger.Directory is a
-// Dagger I/O concern and lives in the workflows/ layer (workflows.Gate); this package only turns
-// raw bytes into a typed manifest.
+// manifest.go — ProjectManifest types + parsing (ADR-0003). See config/doc.go for the package
+// doc. This file is PURE (no Dagger import) so it is unit-testable without an engine; reading the
+// manifest bytes out of a *dagger.Directory is a Dagger I/O concern in workflows.Gate.
 package config
 
 import (
 	"fmt"
+	"path"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -47,6 +46,27 @@ func ParseManifest(raw []byte) (*ProjectManifest, error) {
 		if c.Name == "" || c.Command == "" {
 			return nil, fmt.Errorf("checkable #%d must have both name and command", i)
 		}
+		if err := validateWorkdir(c.Workdir); err != nil {
+			return nil, fmt.Errorf("checkable %q workdir: %w", c.Name, err)
+		}
 	}
 	return &m, nil
+}
+
+// validateWorkdir rejects workdirs that are empty, absolute, or escape the source root via ".."
+// (review-14 HOUSE-2). The gate mounts the source at /src and runs in path.Join("/src", workdir);
+// a workdir like ".." or "/etc" must not be allowed to escape the mounted source.
+func validateWorkdir(workdir string) error {
+	if workdir == "" {
+		return fmt.Errorf("empty (use \".\" for the source root)")
+	}
+	if path.IsAbs(workdir) {
+		return fmt.Errorf("absolute paths not allowed (must be relative to the source root)")
+	}
+	for _, elem := range strings.Split(path.Clean(workdir), "/") {
+		if elem == ".." {
+			return fmt.Errorf(`".." components not allowed (must stay within the source root)`)
+		}
+	}
+	return nil
 }
