@@ -1,4 +1,7 @@
-/dagger.gen.go
-/internal/dagger
-/internal/telemetry
+# Generated bindings (dagger.gen.go, internal/dagger/, internal/telemetry/) are COMMITTED, not
+# ignored: a fresh CI checkout must be able to load the module + the dagmar-gate `.dagger`
+# checkable must `go build` them. The .gitattributes marks them linguist-generated so GitHub hides
+# them from diffs/stats. (Corrects a prior .gitignore that ignored them — contradicting the
+# .gitattributes and the Dagger "commit the generated files" guidance.) Regenerate via `dagger
+# develop` after signature changes, then commit the result.
 /.env

@@ -18,6 +18,7 @@ import (
 	"dagger/dagmar/internal/app"
 	"dagger/dagmar/internal/dagger"
 	"dagger/dagmar/internal/domain"
+	"dagger/dagmar/internal/workflows"
 )
 
 // Dagmar is dagmar's main Dagger object (auto-named from the module). It is the primary
@@ -106,6 +107,31 @@ type Sandbox struct {
 // Container returns the underlying Dagger Container (Tier A).
 func (s *Sandbox) Container() *dagger.Container {
 	return s.ctr
+}
+
+// DagmarBootstrap is dagmar's gate-family PREPARE step (ADR-0009 §2 / ADR-0012 §4): an always-Dagger
+// function that resolves + warms the Project's module dependencies before verification. The method
+// name exposes as the dagger function `dagmar-bootstrap` (the conformance-contract name; kebab-cased
+// by the Go SDK, cf. the docs' DaggerOrganization→dagger-organization idiom). Delegates to workflows.
+func (m *Dagmar) DagmarBootstrap(
+	ctx context.Context,
+	// source is the Project's source tree (CI contract: `dagger call dagmar-bootstrap --source .`).
+	source *dagger.Directory,
+) (string, error) {
+	return workflows.Bootstrap(ctx, source)
+}
+
+// DagmarGate is dagmar's gate-family VERIFY step (ADR-0009 §2 / ADR-0012 §4): an always-Dagger
+// function that runs the manifest-declared checkables (`.dagmar/project.yaml`) — manifest = what,
+// dagmar-gate = how (review-11 GAP-3). Reused in CI (`dagger call dagmar-gate --source .`) AND
+// in-loop (coder self-verification, Phase 2). Exposes as the dagger function `dagmar-gate`.
+// Delegates to workflows.
+func (m *Dagmar) DagmarGate(
+	ctx context.Context,
+	// source is the Project's source tree (CI contract: `dagger call dagmar-gate --source .`).
+	source *dagger.Directory,
+) (string, error) {
+	return workflows.Gate(ctx, source)
 }
 
 const engineLabel = "name=dagger-dagger-helm-engine"

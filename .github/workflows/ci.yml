@@ -1,0 +1,26 @@
+# dagmar's own CI (Phase 1, ADR-0012 §4) — the always-Dagger gate-family.
+#
+# Every push/PR runs `dagger call dagmar-gate --source .`, which reads .dagmar/project.yaml and
+# runs the declared checkables (controller build/test/vet/gofmt + dagger-module build/test/vet)
+# in a golang:1.26 container. dagmar-gate is the same function the coder-Loop will reuse in-loop
+# (Phase 2) — one checkable, two consumers (CONTEXT.md "reused checkable").
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: dagmar-gate
+        uses: dagger/dagger-for-github@v8.4.1
+        with:
+          # Match the engine the module is built against (dagger.json engineVersion v0.21.8).
+          version: "0.21.8"
+          verb: call
+          args: dagmar-gate --source .

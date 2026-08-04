@@ -1,0 +1,23 @@
+# dagmar-own conformance contract (ADR-0003 — the in-repo ProjectManifest).
+#
+# Dogfooding: dagmar (itself a Project) defines its own manifest first; each capability dagmar
+# gains can extend the standard. Phase 1 (ADR-0012 §4) carries only the checkables — the
+# mechanical self-verification the always-Dagger wrapper dagmar-gate runs (manifest = what,
+# dagmar-gate = how).
+#
+# `dagger call dagmar-gate --source .` runs the checkables below in a golang:1.26 container.
+# Both modules build in MODULE MODE in the gate container (only the repo is mounted — no parent
+# go.work — so no GOWORK=off is needed).
+
+checkables:
+  # The Kubernetes control-plane root module (github.com/denkhaus/dagmar): the controller + CRD
+  # types. build + vet + test + gofmt-clean.
+  - name: controller
+    workdir: .
+    command: go build ./... && go vet ./... && go test ./... && test -z "$(gofmt -l .)"
+
+  # The .dagger execution module (dagger/dagmar). The generated bindings (dagger.gen.go,
+  # internal/dagger/) are committed (see .dagger/.gitattributes), so this builds in CI.
+  - name: dagger-module
+    workdir: .dagger
+    command: go build ./... && go vet ./... && go test ./...
