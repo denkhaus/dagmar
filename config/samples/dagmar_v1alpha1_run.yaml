@@ -1,0 +1,10 @@
+apiVersion: dagmar.denkhaus.io/v1alpha1
+kind: Run
+metadata:
+  name: smoke-probe-net
+  namespace: default
+spec:
+  # A Phase-0 dispatch smoke: the controller provisions an agent pod that calls the dagmar
+  # module's probe-net function against the singleton engine (ADR-0012 §2 dispatch vertical).
+  projectRef: dagmar-own
+  moduleFunction: probe-net

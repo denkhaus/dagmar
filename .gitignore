@@ -1,1 +1,4 @@
 .claude/settings-local.json
+
+# controller-gen / tool binaries installed by the Justfile (go-install-tool idiom)
+/bin/

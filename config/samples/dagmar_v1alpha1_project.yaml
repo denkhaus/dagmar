@@ -1,0 +1,11 @@
+apiVersion: dagmar.denkhaus.io/v1alpha1
+kind: Project
+metadata:
+  name: dagmar-own
+  namespace: default
+spec:
+  # dagmar develops itself as a registered Project (ADR-0012 dogfooding). Phase 0 carries only
+  # the repo + the agent-pod-image / module-ref Phase-0 reads; os-eco/credentials/autonomy come
+  # as the control plane grows.
+  repo: https://github.com/denkhaus/dagmar
+  agentPodImage: alpine:3.20

@@ -1,0 +1,4 @@
+# This kustomization.yaml is not intended to be run by itself; it is consumed by config/default.
+resources:
+- bases/dagmar.denkhaus.io_projects.yaml
+- bases/dagmar.denkhaus.io_runs.yaml

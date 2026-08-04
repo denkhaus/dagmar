@@ -1,0 +1,21 @@
+# Build artifacts / generated
+bin/
+**/zz_generated*.go
+
+# Dagger module (separate Go module, not part of the controller image)
+.dagger/
+
+# Repo metadata / tooling
+.git/
+.gitignore
+.mulch/
+.seeds/
+.omnigent/
+.pi/
+.claude/
+docs/
+CONTEXT.md
+CLAUDE.md
+README.md
+LICENSE
+*.md

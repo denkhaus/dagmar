@@ -1,0 +1,7 @@
+domain: denkhaus.io
+layout:
+- go.kubebuilder.io/v4
+projectName: dagmar
+repo: github.com/denkhaus/dagmar
+resources: []
+version: "3"

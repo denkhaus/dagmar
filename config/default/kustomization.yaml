@@ -1,0 +1,8 @@
+# Adds the dagmar- namespace/name prefix and composes CRD + RBAC + manager for deployment.
+namespace: dagmar-system
+namePrefix: dagmar-
+
+resources:
+- ../crd
+- ../rbac
+- ../manager

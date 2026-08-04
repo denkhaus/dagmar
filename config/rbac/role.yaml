@@ -1,0 +1,58 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: manager-role
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - pods/exec
+  verbs:
+  - create
+- apiGroups:
+  - dagmar.denkhaus.io
+  resources:
+  - projects
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - dagmar.denkhaus.io
+  resources:
+  - runs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - dagmar.denkhaus.io
+  resources:
+  - runs/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - dagmar.denkhaus.io
+  resources:
+  - runs/status
+  verbs:
+  - get
+  - patch
+  - update
