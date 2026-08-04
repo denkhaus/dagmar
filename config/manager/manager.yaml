@@ -22,9 +22,12 @@ spec:
       labels:
         control-plane: controller-manager
     spec:
-      # TODO(Phase 0, Increment 2): a ServiceAccount + (Cluster)RoleBinding granting
-      # pods/exec on the engine pod (ADR-0008). Local `just run` uses the kubeconfig user's
-      # perms, so this is only needed for in-cluster `just deploy`.
+      # The RunReconciler provisions the agent pods' OWN identity at runtime (a per-namespace
+      # dagmar-agent ServiceAccount + a pods/exec Role/RoleBinding on the engine), so the
+      # manager Deployment itself only needs the controller's RBAC (config/rbac/role.yaml —
+      # runs/projects/pods/serviceaccounts/roles/rolebindings). This is needed under BOTH
+      # `just run` (the agent pod uses its own in-cluster SA, not the controller's kubeconfig
+      # identity) and `just deploy`.
       containers:
       - name: manager
         image: controller:latest

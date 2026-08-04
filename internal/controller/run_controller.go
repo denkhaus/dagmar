@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/denkhaus/dagmar/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -18,8 +20,9 @@ import (
 )
 
 const (
-	// engineLabel selects the singleton Dagger engine pod (cbb8 spike recipe, helm chart name).
-	engineLabel = "name=dagger-dagger-helm-engine"
+	// engineLabelKey/Val select the singleton Dagger engine pod (cbb8 spike recipe, helm chart).
+	engineLabelKey = "name"
+	engineLabelVal = "dagger-dagger-helm-engine"
 	// engineNamespace is where the singleton engine DaemonSet runs.
 	engineNamespace = "dagmar"
 	// defaultAgentPodImage is the Phase-0 default agent image (runtime-installs kubectl + dagger,
@@ -27,6 +30,16 @@ const (
 	defaultAgentPodImage = "alpine:3.20"
 	// daggerVersion is the CLI version installed into the agent pod.
 	daggerVersion = "0.21.8"
+	// agentSA is the per-namespace ServiceAccount the agent pods run as (shared across Runs in a
+	// namespace). It is granted pods/exec on the engine via agentRole/agentRoleBinding.
+	agentSA = "dagmar-agent"
+	// agentRole is the Role (in the engine namespace) granting the agent SA pods/exec on the
+	// engine pod. Shared; created once.
+	agentRole = "dagmar-agent-exec"
+
+	// engineRequeueAfter is the requeue delay when the engine pod is not yet Ready (transient —
+	// the engine may still be rolling out at kind bringup).
+	engineRequeueAfter = 10 * time.Second
 
 	// conditionAvailable is the Run "Available" condition type.
 	conditionAvailable = "Available"
@@ -46,9 +59,12 @@ type RunReconciler struct {
 // +kubebuilder:rbac:groups=dagmar.denkhaus.io,resources=projects,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=pods/exec,verbs=create
+// +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch;create;update;patch
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles,verbs=get;list;watch;create;update;patch
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;list;watch;create;update;patch
 
-// Reconcile drives a Run: it resolves the Project + the singleton engine pod, ensures an agent
-// pod exists that calls the module, and mirrors the pod's phase into the Run's status.
+// Reconcile drives a Run: it resolves the Project + the singleton engine pod, ensures the agent
+// identity + an agent pod that calls the module, and mirrors the pod's phase into Run status.
 func (r *RunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
@@ -61,46 +77,109 @@ func (r *RunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		return ctrl.Result{}, err
 	}
 
-	// 2. Fetch the referenced Project.
+	// 2. Fetch the referenced Project. A missing Project is a config error (terminal).
 	project := &v1alpha1.Project{}
 	if err := r.Get(ctx, types.NamespacedName{Name: run.Spec.ProjectRef, Namespace: run.Namespace}, project); err != nil {
 		if errors.IsNotFound(err) {
-			return ctrl.Result{}, r.setStatus(ctx, run, v1alpha1.RunPhaseFailed, "ProjectNotFound",
-				fmt.Sprintf("referenced Project %q not found", run.Spec.ProjectRef), metav1.ConditionFalse)
+			return ctrl.Result{}, r.failRun(ctx, run, "ProjectNotFound",
+				fmt.Sprintf("referenced Project %q not found", run.Spec.ProjectRef))
 		}
 		return ctrl.Result{}, err
 	}
 
-	// 3. Resolve the singleton engine pod name (kube-pod:// target).
-	enginePod, err := r.enginePodName(ctx)
-	if err != nil {
-		return ctrl.Result{}, r.setStatus(ctx, run, v1alpha1.RunPhaseFailed, "EngineNotFound",
-			err.Error(), metav1.ConditionFalse)
+	// 3. ModuleRef is a load-bearing Phase-0 read (ADR-0012 §2 GAP-1): the agent pod must know
+	// which module version to invoke. Empty → terminal config error.
+	if project.Spec.ModuleRef == "" {
+		return ctrl.Result{}, r.failRun(ctx, run, "ModuleRefRequired",
+			"Project.Spec.ModuleRef is empty; it must name the dagmar module ref for `dagger call -m`")
 	}
 
-	// 4. Ensure the agent pod exists (owned by the Run).
+	// 4. Resolve the singleton engine pod (a Ready one). Transiently absent (engine still rolling
+	// out) → requeue, not terminal.
+	enginePod, err := r.enginePodName(ctx)
+	if err != nil {
+		logger.Info("engine pod not ready; requeueing", "err", err)
+		_ = r.setStatus(ctx, run, v1alpha1.RunPhasePending, "EngineNotReady",
+			err.Error(), metav1.ConditionUnknown)
+		return ctrl.Result{RequeueAfter: engineRequeueAfter}, nil
+	}
+
+	// 5. Ensure the agent identity (SA + pods/exec Role/RoleBinding) + the owned agent pod.
+	if err := r.ensureAgentIdentity(ctx, run); err != nil {
+		logger.Error(err, "ensure agent identity", "run", req.NamespacedName)
+		return ctrl.Result{}, err
+	}
 	pod, err := r.ensureAgentPod(ctx, run, project, enginePod)
 	if err != nil {
 		logger.Error(err, "ensure agent pod", "run", req.NamespacedName)
 		return ctrl.Result{}, err
 	}
 
-	// 5. Mirror the pod phase into the Run status + record the pod name.
+	// 6. Mirror the pod phase into the Run status + record the pod name.
 	return ctrl.Result{}, r.setStatus(ctx, run, podPhaseToRunPhase(pod.Status.Phase), "Reconciling",
 		"agent pod observed", runConditionStatus(pod.Status.Phase))
 }
 
-// enginePodName lists the singleton engine pod (by helm chart label) and returns its name.
+// enginePodName lists a Ready singleton engine pod and returns its name.
 func (r *RunReconciler) enginePodName(ctx context.Context) (string, error) {
-	labelKey, labelVal := splitLabel(engineLabel)
 	pods := &corev1.PodList{}
-	if err := r.List(ctx, pods, client.InNamespace(engineNamespace), client.MatchingLabels{labelKey: labelVal}); err != nil {
+	if err := r.List(ctx, pods, client.InNamespace(engineNamespace),
+		client.MatchingLabels{engineLabelKey: engineLabelVal}); err != nil {
 		return "", fmt.Errorf("list engine pods: %w", err)
 	}
-	if len(pods.Items) == 0 {
-		return "", fmt.Errorf("no engine pod found in namespace %q with label %s", engineNamespace, engineLabel)
+	for _, p := range pods.Items {
+		if p.Status.Phase == corev1.PodRunning {
+			return p.Name, nil
+		}
 	}
-	return pods.Items[0].Name, nil
+	return "", fmt.Errorf("no Running engine pod in namespace %q with label %s=%s (engine still rolling out?)",
+		engineNamespace, engineLabelKey, engineLabelVal)
+}
+
+// ensureAgentIdentity ensures the per-namespace agent ServiceAccount and the pods/exec Role +
+// RoleBinding that let the agent pod exec into the engine (cross-namespace: the SA lives in the
+// Run's namespace; the Role/RoleBinding live in the engine namespace and bind that SA). Shared
+// (created once per namespace), not per-Run. Phase 0: cleanup of the engine-namespace Role/
+// RoleBinding on Run deletion is deferred (no cross-namespace ownerRef) — tracked in dagmar-67bc.
+func (r *RunReconciler) ensureAgentIdentity(ctx context.Context, run *v1alpha1.Run) error {
+	// ServiceAccount in the Run's namespace (where the agent pod runs).
+	sa := &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: agentSA, Namespace: run.Namespace}}
+	if err := r.Get(ctx, client.ObjectKeyFromObject(sa), sa); errors.IsNotFound(err) {
+		if err := ctrl.SetControllerReference(run, sa, r.Scheme); err != nil {
+			return fmt.Errorf("set SA owner ref: %w", err)
+		}
+		if err := r.Create(ctx, sa); err != nil && !errors.IsAlreadyExists(err) {
+			return fmt.Errorf("create agent SA: %w", err)
+		}
+	} else if err != nil {
+		return fmt.Errorf("get agent SA: %w", err)
+	}
+
+	// Role in the engine namespace granting pods/exec on pods there.
+	role := &rbacv1.Role{ObjectMeta: metav1.ObjectMeta{Name: agentRole, Namespace: engineNamespace}}
+	if err := r.Get(ctx, client.ObjectKeyFromObject(role), role); errors.IsNotFound(err) {
+		role.Rules = []rbacv1.PolicyRule{{
+			APIGroups: []string{""}, Resources: []string{"pods", "pods/exec"}, Verbs: []string{"create", "get"},
+		}}
+		if err := r.Create(ctx, role); err != nil && !errors.IsAlreadyExists(err) {
+			return fmt.Errorf("create agent Role: %w", err)
+		}
+	} else if err != nil {
+		return fmt.Errorf("get agent Role: %w", err)
+	}
+
+	// RoleBinding in the engine namespace, binding the SA (Run's namespace) to the Role.
+	rb := &rbacv1.RoleBinding{ObjectMeta: metav1.ObjectMeta{Name: agentRole, Namespace: engineNamespace}}
+	if err := r.Get(ctx, client.ObjectKeyFromObject(rb), rb); errors.IsNotFound(err) {
+		rb.Subjects = []rbacv1.Subject{{Kind: "ServiceAccount", Name: agentSA, Namespace: run.Namespace}}
+		rb.RoleRef = rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "Role", Name: agentRole}
+		if err := r.Create(ctx, rb); err != nil && !errors.IsAlreadyExists(err) {
+			return fmt.Errorf("create agent RoleBinding: %w", err)
+		}
+	} else if err != nil {
+		return fmt.Errorf("get agent RoleBinding: %w", err)
+	}
+	return nil
 }
 
 // ensureAgentPod creates the agent pod if it does not yet exist and returns it.
@@ -124,10 +203,11 @@ func (r *RunReconciler) ensureAgentPod(ctx context.Context, run *v1alpha1.Run, p
 	return newPod, nil
 }
 
-// agentPodFor builds the agent pod that installs kubectl + the dagger CLI and runs
-// `dagger call <fn> <args>` against the singleton engine via kube-pod://. The pod uses in-cluster
-// auth (its ServiceAccount) for the kubectl exec the runner host performs — so no kubeconfig
-// mount is needed (unlike the cbb8 Probe client, which ran outside the cluster).
+// agentPodFor builds the agent pod. It installs kubectl + the dagger CLI and runs
+// `dagger call -m <ModuleRef> <fn> <args>` against the singleton engine via kube-pod://. The pod
+// runs as the per-namespace dagmar-agent SA (granted pods/exec on the engine) and uses in-cluster
+// auth for the kubectl exec the runner host performs — no kubeconfig mount (unlike the cbb8 Probe
+// client, which ran outside the cluster).
 func agentPodFor(run *v1alpha1.Run, project *v1alpha1.Project, enginePod, podName string) *corev1.Pod {
 	image := defaultAgentPodImage
 	if project.Spec.AgentPodImage != "" {
@@ -135,8 +215,8 @@ func agentPodFor(run *v1alpha1.Run, project *v1alpha1.Project, enginePod, podNam
 	}
 	runnerHost := fmt.Sprintf("kube-pod://%s?namespace=%s", enginePod, engineNamespace)
 	cmd := fmt.Sprintf(
-		`apk add --no-cache kubectl curl && DAGGER_VERSION=%s curl -fsSL https://dl.dagger.io | sh && dagger call %s %s`,
-		daggerVersion, run.Spec.ModuleFunction, shellJoin(run.Spec.ModuleArgs),
+		`apk add --no-cache kubectl curl && DAGGER_VERSION=%s curl -fsSL https://dl.dagger.io | sh && dagger call -m %s %s %s`,
+		daggerVersion, project.Spec.ModuleRef, run.Spec.ModuleFunction, shellJoin(run.Spec.ModuleArgs),
 	)
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -148,7 +228,8 @@ func agentPodFor(run *v1alpha1.Run, project *v1alpha1.Project, enginePod, podNam
 			},
 		},
 		Spec: corev1.PodSpec{
-			RestartPolicy: corev1.RestartPolicyNever,
+			RestartPolicy:      corev1.RestartPolicyNever,
+			ServiceAccountName: agentSA,
 			Containers: []corev1.Container{{
 				Name:    "agent",
 				Image:   image,
@@ -170,6 +251,11 @@ func (r *RunReconciler) setStatus(ctx context.Context, run *v1alpha1.Run, phase,
 		ObservedGeneration: run.Generation,
 	})
 	return r.Status().Update(ctx, run)
+}
+
+// failRun is setStatus with Phase=Failed + Available=False (terminal config errors).
+func (r *RunReconciler) failRun(ctx context.Context, run *v1alpha1.Run, reason, message string) error {
+	return r.setStatus(ctx, run, v1alpha1.RunPhaseFailed, reason, message, metav1.ConditionFalse)
 }
 
 func agentPodName(runName string) string { return runName + "-agent" }
@@ -198,14 +284,8 @@ func runConditionStatus(p corev1.PodPhase) metav1.ConditionStatus {
 	}
 }
 
-// splitLabel splits a "key=value" label selector into its parts.
-func splitLabel(kv string) (string, string) {
-	k, v, _ := strings.Cut(kv, "=")
-	return k, v
-}
-
-// shellJoin joins args into a shell-safe argument string (one space, no escaping for Phase 0
-// spike; the Run CR is a privileged resource and ModuleArgs are author-controlled).
+// shellJoin joins args into a shell argument string (Phase 0 spike; no escaping — ModuleArgs are
+// author-controlled via the Run CR, a privileged resource. Revisit for Phase 2 untrusted input.)
 func shellJoin(args []string) string {
 	return strings.Join(args, " ")
 }

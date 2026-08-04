@@ -1,3 +1,6 @@
-## This file is intentionally left blank so kustomize does not fail when there is no
-## resources to bundle. Add sample CRs here as they are created.
-# resources:
+## Sample CRs for the Phase-0 dispatch vertical (ADR-0012 §2). Apply individually or via
+## `just apply-samples`. Project(dagmar-own) registers dagmar as its own target Project; the
+## Run drives a smoke `dagger call probe-net` through the controller.
+resources:
+- dagmar_v1alpha1_project.yaml
+- dagmar_v1alpha1_run.yaml

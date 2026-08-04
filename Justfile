@@ -25,6 +25,10 @@ generate: controller-gen
 install: manifests
     kustomize build config/crd | kubectl apply -f -
 
+# apply the sample Project(dagmar-own) + Run into the current cluster
+apply-samples:
+    kubectl apply -f config/samples/
+
 # run the controller locally against the current cluster's kubeconfig
 run: manifests
     go run ./cmd/dagmar-controller

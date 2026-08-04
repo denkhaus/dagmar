@@ -1,6 +1,7 @@
-// SchemeBuilder registers the dagmar CRD types into a runtime scheme. Uses the controller-runtime
-// scheme.Builder (Kubebuilder idiom) whose Register takes the type objects directly.
 package v1alpha1
+
+// GroupVersion + SchemeBuilder for the dagmar CRD types. The controller-runtime scheme.Builder
+// (Kubebuilder idiom) registers the type objects directly; the package doc lives in doc.go.
 
 import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
