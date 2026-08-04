@@ -1,10 +1,13 @@
 # ADR-0013: Kubernetes control-plane design — topology, reconciliation & dispatch
 
 Date: 2026-08-04
-Seed: dagmar-67bc (part of dagmar-80dd) · Status: **PROPOSED**
-Decided via grilling 2026-08-04. Resolves the wayfinder "Kubernetes control-plane design
-(CRD/operator vs. controller+workers; dispatch; concurrency)" item and is the design home for
-the control-plane internals ADR-0012 explicitly deferred out of Phase 0.
+Seed: dagmar-67bc (part of dagmar-80dd) · Status: **ACCEPTED**
+Decided via grilling 2026-08-04; revised after dagmar-review 15
+(`docs/review/15-2026-08-04-2b35fad-67bc.md`, NEEDS-WORK → revised: FIX-1 hermeticity model,
+GAP-1 Task-granularity, GAP-2/3 engine-git-creds honesty, GAP-4 os-eco feasibility, GAP-5
+stale-pointer recovery, HOUSE/SPEC sharpening; then accepted). Resolves the wayfinder
+"Kubernetes control-plane design (CRD/operator vs. controller+workers; dispatch; concurrency)"
+item and is the design home for the control-plane internals ADR-0012 deferred out of Phase 0.
 
 ## Context
 
@@ -16,34 +19,36 @@ commit ca26df7). This ADR fixes the design that vertical grows toward.
 
 **Already decided (do not re-litigate):**
 
-- CRD set: {Project, Agent, Prompt, QualityGate, Trigger, Run} (ADR-0002).
+- CRD set: {Project, Agent, Prompt, QualityGate, Trigger, Run} (ADR-0002). Non-CR: Task (≡ one
+  seeds issue), Sandbox, Workspace, ProjectManifest.
 - Hybrid-C topology: K8s control-plane + in-cluster singleton Dagger engine (ADR-0004).
 - Agent pods are `kube-pod://` clients of the singleton engine; per-Project SA + `pods/exec` +
   `pods:get` RBAC + distinct cache-vol names (ADR-0008). The controller provisions these.
-- Root module hosts the CRD types (`api/v1alpha1/`) + controller (`cmd/dagmar-controller/`);
+- Root module hosts the CRD types (`api/v1alpha1/`) + controller (`cmd/dagmar-controller/`).
 - Merge is a deterministic controller function, never an LLM action; the merge tool is in no
   Agent's tool-set (ADR-0006).
 - os-eco is read-local inside the hermetic loop; sync is networked outside it (ADR-0011 §9).
+- **Workspace is per-Run isolated (no shared clone); Workspace lineage is per-Task (CONTEXT.md).**
+  Load-bearing for §3: there is no shared mutable checkout between Runs, so concurrency does not
+  race a workspace — the serialization driver is lineage dependency within a Task.
 
 **Out of scope (separate seeds):** the event/trigger model (GitHub webhooks, manual,
-subscription) — that is Phase 3 autonomy (ADR-0012 §5). This ADR fixes the *dispatch/reconcile
-core*, not event sources.
+subscription) — Phase 3 autonomy (ADR-0012 §5). This ADR fixes the dispatch/reconcile core.
 
 ## Decision
 
 ### 1. Topology — one manager, one controller per active CRD; no worker pool (D1, D2)
 
-One `controller-runtime` manager process runs all controllers; each **active** CRD gets its own
+One `controller-runtime` manager process runs all controllers; each active CRD gets its own
 controller (`Run` now; `Project`/`Agent` reconcile as configuration that provisions identity +
-pods). There is **no separate worker process**: the agent pods *are* the execution units
-(hybrid-C — the control plane owns state/reconcile, the engine+pods own execution). A
-controller+worker split would duplicate the execution layer the agent pods already provide.
+pods). There is no separate worker process: the agent pods are the execution units (hybrid-C —
+the control plane owns state/reconcile, the engine+pods own execution). A controller+worker
+split would duplicate the execution layer the agent pods already provide.
 
-**Admission webhooks: none this increment.** The controller validates reconcile-side and fails
+Admission webhooks: none this increment. The controller validates reconcile-side and fails
 terminally on invalid input (review-12: invalid `moduleRef`/`moduleFunction` → `Failed`). A
 validating webhook is a real win only for pre-accept reject (quota, ref resolution before store)
-or defaulting — revisit deliberately then, not speculatively now. This keeps the "lean,
-growing" posture (ADR-0012 §3).
+or defaulting — revisit deliberately then. Keeps the "lean, growing" posture (ADR-0012 §3).
 
 ### 2. Reconciliation model — Pod-watch requeue, identity finalizer, metav1.Condition (D3–D5)
 
@@ -54,142 +59,168 @@ the pod is `Running`) needs no extra RBAC; the pod never writes `Run` status bac
 privilege, ADR-0008).
 
 **Finalizer / cleanup (D4):** a finalizer on `Project` tears down the provisioned identity (SA +
-`RoleBinding`s). The per-Project **cache-vol is retained** (warm — fast re-create; dagmar's
-value is iteration speed). A reclaim policy (TTL / size) is a later increment. `Run` deletion
-garbage-collects its pod via the owner reference.
+`RoleBinding`s). The per-Project cache-vol is retained (warm — fast re-create; dagmar's value is
+iteration speed). The retained cache-vol is an engine-side object (cache identity keys by volume
+name, ADR-0008 §3), NOT a namespace object — the namespace-scoped finalizer does not touch it, so
+warm retention leaves an engine-side artifact outside the `Project` namespace with no named owner
+until a reclaim policy exists. Reclaim ownership (controller / engine / ops) and policy (TTL /
+size) are a later increment (review-15 HOUSE-4). `Run` deletion garbage-collects its pod via the
+owner reference.
 
 **Status conditions (D5):** standard `metav1.Condition` with a pinned minimal set, grown
 deliberately: `Run` {Accepted, Progressing, Succeeded, Failed}; `Project` {Provisioned, Ready}.
-Idiomatic, k9s-readable, and carries reason/message/lastTransition.
+Idiomatic, k9s-readable, carries reason/message/lastTransition.
 
-### 3. Dispatch concurrency — per-Project serialized, cross-Project parallel (D6, D7)
+### 3. Dispatch concurrency & lineage — per-Task lineage serialization; parallel across Tasks/Projects (D6, D7)
 
-**Concurrency granularity (D6):** within a `Project`, at most **one dispatching `Run`** at a
-time — the workspace (the repo checkout on the cache-vol) is shared mutable state; two agents
-editing one checkout corrupt it. Different `Project`s run concurrently (isolated cache-vols +
-namespaces, ADR-0008; the singleton engine serves many). Global serialization would waste engine
-capacity; unlimited concurrency would race the working tree.
+> **Review-15 GAP-1 revision.** An earlier draft serialized at **Project** granularity on a
+> "shared mutable workspace" premise. That premise is false: CONTEXT.md defines `Workspace` as
+> per-Run isolated ("no shared clone — avoids file-change collisions"). The real serialization
+> driver is **lineage dependency within a Task**. Granularity is corrected to Task.
 
-**Workspace-lineage pointer (D7):** controller-owned, stored on `Project.Status` as
-`lineageHead` (commit SHA) + `activeRun`. The controller sets `activeRun` on dispatch, clears it
-on terminal, and advances `lineageHead` to the run's output commit. A new `Run` for that
-`Project` requeues while `activeRun` is set (Run-out → next Run-in). Living on the CR the
-controller already reconciles avoids a pod-owned linked-list walk (racy under concurrent
-reconcile) and a separate `coordination.k8s.io` Lease (unneeded when the controller centrally
-sequences).
+**Concurrency granularity (D6):** within a Task, at most one dispatching Run at a time — but the
+reason is **lineage dependency, not a shared-checkout race**: Run N's base ref is Run N−1's
+output commit (CONTEXT.md: "Workspace lineage across a Task's Runs, Run-out → next Run-in"), so
+Run N cannot start until Run N−1 produces its output. A "dispatching Run" = a Run past `Accepted`
+with an active pod (`Progressing`/`Dispatched`), equivalently the Task's single non-terminal Run
+(review-15 HOUSE-5). Across Tasks (same Project) and across Projects, Runs execute in parallel —
+Workspaces are per-Run isolated, so there is no file collision to prevent. Cross-Task and
+cross-Project parallelism is safe contingent on the controller's allocation invariants from
+ADR-0008 §3 — distinct cache-vol names and distinct namespaces per Project — which the
+provisioning design (§4) must preserve (review-15 HOUSE-2).
+
+This answers ADR-0008 §5's deferred question ("whether concurrent Runs on one Task are allowed"):
+within a Task, **no** (lineage-ordered); across Tasks and Projects, **yes**.
+
+**Lineage pointer (D7):** lineage is per-Task and tracked on the `Run` CRs that share a
+`spec.taskRef` (Task ≡ one seeds issue, a non-CR reference). Each Run carries
+`status.outputCommit` and `status.predecessorRun`. The controller derives a Task's state from Run
+status rather than storing a single pointer: the active Run = the non-terminal Run with that
+`taskRef`; the lineage head = the latest terminal Run's `outputCommit`. A new Run for a Task
+requeues while a non-terminal Run for that `taskRef` exists; on dispatch it uses the lineage
+head's `outputCommit` as its base ref. There is no single field on `Project` — a Project has N
+Tasks, each an independent lineage.
+
+**Stale-pointer / crash recovery (review-15 GAP-5):** the active-Run gate is "a non-terminal Run
+with this `taskRef` exists." If, on reconcile, that Run's pod is absent (`NotFound`) without a
+terminal Condition — node failure, force-delete, eviction — the controller marks the Run terminal
+(`Failed`, reason `AgentPodLost`), which frees the Task for its next Run. A Run holds its Task's
+slot until it reaches a terminal Condition OR its pod is observed absent, whichever the
+controller sees first.
 
 ### 4. Provisioning fields (D8–D10)
 
-- **`moduleRef` (D8):** stays on `Project.spec` — it is the project's capability module (the
-  Dagger module whose functions the agent calls). The Phase-0 home is confirmed as the design
-  home.
-- **`agent-pod-image` (D9):** a **platform default** (a `dagmar-config` ConfigMap / controller
-  flag), versioned with dagmar's release, optionally overridable on `Agent.spec`. The harness
-  image is platform infra, not project-specific; one image suffices now, and the `Agent` CR stays
-  cognitive (model + tool-set + prompt), not a pod template.
-- **`engine-git-creds` (D10):** per-Project **scoped** credentials — `Project.spec.gitCredentialsRef`
+- **`moduleRef` (D8):** stays on `Project.spec` — the project's capability module (the Dagger
+  module whose functions the agent calls). Phase-0 home confirmed as the design home.
+- **`agent-pod-image` (D9):** a platform default (a `dagmar-config` ConfigMap / controller flag),
+  versioned with dagmar's release, optionally overridable on `Agent.spec`. The Alternatives
+  reject making the image **mandatory/fixed** on `Agent.spec` (conflates persona with pod
+  template, forces every Agent to know a platform image). An **optional override** is different:
+  the default covers the common case and the override is an escape hatch for the rare persona
+  that genuinely needs a different harness — it does not re-conflate, because the platform still
+  owns the default (review-15 HOUSE-3).
+- **`engine-git-creds` (D10):** per-Project scoped credentials — `Project.spec.gitCredentialsRef`
   → a `Secret` in the `Project`'s namespace (deploy token / fine-grained PAT, `contents: read`
-  on the module repo only). The singleton engine holds **no broad creds**; each dispatch carries
-  the scoped credential for that `Project`'s module. This matches per-Project namespace isolation
-  (ADR-0008) and the two-layer credential defense (ADR-0007 / A1). Dogfood: `dagmar`-as-a-Project
-  carries `dagmar-git-creds` to read its own (now private) module.
-
-  > **Spike-bound (mechanism):** exactly how the singleton engine receives per-dispatch scoped
-  > git creds under Dagger v0.21.x is implementation-uncertain and is resolved by a small spike
-  > (prototypes-for-decisions), not asserted here. The **shape** (per-Project scoped, engine
-  > holds none) is decided.
+  on the module repo only). **Honesty about ADR-0007 (review-15 GAP-2/GAP-3):** the singleton
+  engine (a shared DaemonSet in a system namespace) consumes this credential to clone the private
+  capability module — a path ADR-0007 never contemplated, sitting outside both of its layers (the
+  per-Project namespace does not bound the engine; the credential is an engine-process use, not a
+  per-Run Sandbox projection of the `vcs`/`os-eco`/`llm` classes). This ADR therefore does **not**
+  claim ADR-0007/A1 consistency as settled. The invariant the spike must preserve: the engine
+  holds **no standing credential**; per-dispatch injection is ephemeral, never visible across
+  Projects, confined to one Project's scoped token. "Engine holds none" is a **desired invariant,
+  spike-gated, not a premise.** ADR-0007/A1 consistency is conditional on spike `dagmar-2c68`
+  confirming a mechanism that can achieve it.
 
 ### 5. State & persistence — hybrid CRs + object-storage; os-eco as manifest-declared tool-ports (D11, D12)
 
-**State home (D11):** **hybrid**. Structured `Run`/`Project` status lives on the CRs (k9s-queryable,
-Kubernetes-native); large unstructured blobs (logs, outputs, traces) live in object storage
-(MinIO/S3), referenced via `Status.artifactRef`. A retention policy prunes completed `Run`s to
+**State home (D11):** hybrid. Structured Run/Project status on the CRs (k9s-queryable,
+Kubernetes-native); large unstructured blobs (logs, outputs, traces) in object storage
+(MinIO/S3), referenced via `Status.artifactRef`. A retention policy prunes completed Runs to
 bound etcd. Early increments may start CR-only and add object storage when logs outgrow CRs;
 object storage is the long-term home for blobs regardless.
 
 **os-eco bindings (D12):** seeds (issues) and mulch (expertise) are exposed to the LLM through
-**abstract, manifest-declared interfaces**, not hard-coded. The `ProjectManifest`
-(`.dagmar/project.yaml`) declares each binding as bash commands with placeholders; dagmar wraps
-each into a dedicated LLM tool (e.g. `issues_read`, `issues_write`, `expertise_read`,
-`expertise_write`). This is the hexagonal port/adapter pattern (ADR-0010) applied to os-eco, and
-the same separation as checkables/gate (manifest = *what*, tool-wrapper = *how*) — making dagmar
-**vendor-agnostic** (swap the tracker or expertise store by changing the commands, not the
-tools' signatures).
+abstract, manifest-declared interfaces, not hard-coded. The `ProjectManifest` declares each
+binding as bash commands with placeholders; dagmar wraps each into a dedicated LLM tool
+(`issues_read`, `issues_write`, `expertise_read`, `expertise_write`). Hexagonal port/adapter
+(ADR-0010) applied to os-eco; manifest = *what*, tool-wrapper = *how* — vendor-agnostic.
 
-Hermeticity (ADR-0011 §9) is preserved by five rules:
+**Feasibility assumption, stated explicitly (review-15 GAP-4):** D12 requires the Dagger LLM
+primitive to expose a **data-driven tool-registration surface** (tools derivable from
+manifest-declared commands, per Project). If the primitive's tool surface is static (tools fixed
+at `Env` construction), D12 is not implementable without upstream changes — so primitive
+feasibility (can manifest bash commands become real LLM tools at all?) is spike `dagmar-e8f3`
+question #1, ahead of the hermeticity/argv mechanics.
 
-1. **Read-only is a contract *and* sandbox-enforced** — the manifest classifies a command's
-   read/write intent, but the in-loop sandbox independently guarantees hermeticity
-   (network-restricted, FS read-only except the workspace). A misclassified "read" cannot escape.
-2. **Placeholders → argv, never string interpolation** — the tool wrapper passes LLM-supplied
-   args as separate argv elements (or strictly escaped), never raw into a shell string. This
-   removes shell-injection as an attack surface.
+Hermeticity (ADR-0011) is preserved by five rules:
+
+1. **Hermeticity is a tool-surface constraint, not a network air-gap (review-15 FIX-1).** The
+   singleton engine's container exec has outbound network by default (ProbeNet), and there is no
+   per-exec no-network lever in Dagger v0.21.x (`ContainerWithExecOpts` has no network field) —
+   this residual is deliberately accepted (ADR-0011 §3). The agent therefore reaches os-eco ONLY
+   through the curated in-loop tools, because the raw `container`/`git`/`http` tools are withheld
+   from hermetic agents (ADR-0011 §2) — there is no alternate path to read or mutate the stores.
+   The manifest's read-local-vs-network classification is consequently a **load-bearing,
+   reviewable invariant**: only read-local commands are admitted to the in-loop tool-set; a
+   networked read is out-of-loop only. (An earlier draft's "network-restricted sandbox" and "FS
+   read-only except workspace" claims are **retracted** — no mechanism establishes either; the
+   control is tool-set curation, and defense-in-depth — any escape bounded to one Project's
+   namespace + projection — is ADR-0007's, restated here, not invented.)
+2. **Placeholders → argv substantially reduces shell-injection surface (review-15 HOUSE-1)** when
+   the wrapper argv-applies the placeholders and the manifest body does not re-interpolate them.
+   Because the bindings are bash bodies invoked through a shell, this is a real reduction of
+   surface, not its elimination — and enforcing the argv/escape discipline is a property the
+   wrapping spike (`dagmar-e8f3`) must guarantee.
 3. **In-loop reads are read-local (network-free)** — mulch and seeds are in-repo git-native, so
-   read-local is hermetic. A binding whose read needs the network (a live remote tracker) is
-   out-of-loop only.
+   read-local is hermetic. After FIX-1, **this rule carries hermeticity** (not Rule 1): a binding
+   whose read needs the network is out-of-loop only, and that classification is the primary
+   control the wrapper enforces.
 4. **Writes execute in a separate, networked context — never in the loop** — write tools are
    given to the LLM only in a non-hermetic turn (a post-run record step / a gated external
-   agent). The loop never mutates os-eco. This is ADR-0011 §9 realized as a tool-availability
-   rule.
-5. **Home is the manifest, not the `Project` CR** — the commands are project-specific and
-   version with the repo; the `Project` CR carries the pointer + credentials + runtime overrides.
-
-  > **Spike-bound (mechanism):** how dagmar turns manifest-declared bash commands into real LLM
-  > tools inside the Dagger LLM primitive depends on the primitive's tool-registration surface
-  > (Phase 2 cognition). The **design** (abstract interface, manifest-declared, read-in-loop /
-  > write-gated) is decided; the wrapping mechanism is spike-bound.
+   agent). The loop never mutates os-eco (ADR-0011 §9 as a tool-availability rule).
+5. **Home is the manifest, not the `Project` CR** — the commands are project-specific and version
+   with the repo; the `Project` CR carries the pointer + credentials + runtime overrides.
 
 ## Alternatives considered
 
-- **Controller + worker pool (D1):** rejected — duplicates the execution layer the agent pods
-  already are.
-- **One controller per CRD as separate binaries (D1):** rejected — operational overhead with no
-  benefit at six CRDs and one team.
-- **Admission webhooks now (D2):** deferred — the win (pre-accept reject / defaulting) does not
-  yet justify the moving parts; reconcile-side validation suffices.
-- **Poll-based requeue (D3):** rejected — wastes reconciles and delays terminal detection by up
-  to one interval; the owner-ref watch is strictly better.
-- **Pod writes `Run` status back (D3):** rejected — needs write RBAC on `Run`s for the pod SA,
-  breaking least privilege.
-- **Full teardown incl. cache-vol on `Project` delete (D4):** rejected — loses the warm cache,
-  against dagmar's iteration-speed value; retain + later reclaim policy instead.
-- **`Status.Phase` string (D5):** rejected — loses reason/message/lastTransition; `metav1.Condition`
-  is idiomatic and richer for equal cost.
-- **Global Run serialization (D6):** rejected — wastes singleton-engine capacity across `Project`s.
-- **Lineage as a linked list on `Run`s / a `coordination.k8s.io` Lease (D7):** rejected — the
-  list walk is racy under concurrent reconcile; the Lease adds an object + renewal for something
-  the controller centrally sequences already.
-- **`agent-pod-image` on `Project.spec` or fixed on `Agent.spec` (D9):** rejected — the former
-  conflates project conformance with platform infra (N-fold maintenance); the latter forces every
-  `Agent` to know a platform image and conflates persona with pod template.
-- **Platform engine-wide git creds (D10):** rejected — the singleton engine holding broad read
-  access across all `Project`s is a blast-radius violation of the isolation principle.
-- **CR-only or external-DB state (D11):** CR-only bloats etcd once logs accumulate; an external DB
-  is a new stateful component unjustified at this scale and breaks the Kubernetes-native line.
-- **Read-only snapshot mount for mulch (D12):** superseded — the manifest-declared tool-port is
-  strictly more general (vendor-agnostic, data-driven tool-set) and still hermetic.
+- **Controller + worker pool (D1):** rejected — duplicates the execution layer the agent pods are.
+- **One controller per CRD as separate binaries (D1):** rejected — operational overhead, no benefit.
+- **Admission webhooks now (D2):** deferred — pre-accept reject / defaulting does not yet justify the moving parts.
+- **Poll-based requeue (D3):** rejected — wastes reconciles, delays terminal detection; owner-ref watch is strictly better.
+- **Pod writes `Run` status back (D3):** rejected — needs write RBAC on `Run`s for the pod SA, breaking least privilege.
+- **Full teardown incl. cache-vol on `Project` delete (D4):** rejected — loses the warm cache.
+- **`Status.Phase` string (D5):** rejected — loses reason/message/lastTransition.
+- **Project-granularity serialization (D6, review-15 GAP-1):** rejected — too strict (blocks concurrent Tasks within a Project, which the per-Run-isolated Workspace model permits) and justified by a shared-checkout premise the docs deny. Task granularity matches CONTEXT.md + ADR-0008 §5.
+- **Linked-list / Lease for lineage (D7):** a Run-status-derived per-Task lineage avoids both a racy cross-reconcile walk and an extra `coordination.k8s.io` Lease; the controller already reconciles Runs.
+- **`agent-pod-image` on `Project.spec` / fixed on `Agent.spec` (D9):** rejected — the former conflates project conformance with platform infra; the latter forces every Agent to know a platform image and conflates persona with pod template. Optional override on `Agent.spec` is the chosen middle.
+- **Platform engine-wide git creds (D10, review-15 GAP-2):** rejected — the singleton engine holding broad read access across all Projects is a blast-radius violation of the isolation principle. The chosen per-Project scoped shape is the right direction, with ADR-0007 consistency conditioned on the spike.
+- **CR-only or external-DB state (D11):** CR-only bloats etcd once logs accumulate; an external DB is a new stateful component unjustified at this scale.
+- **Read-only snapshot mount for mulch (D12):** superseded — the manifest-declared tool-port is strictly more general and still hermetic.
 
 ## Consequences
 
 - The root controller grows one controller per active CRD behind one manager; `RunReconciler`
-  gains an owner-ref pod watch + `metav1.Condition` writes. `Project` gains a finalizer (identity
-  teardown) + `Status {lineageHead, activeRun}`.
-- Concurrency is bounded naturally: one dispatching `Run` per `Project`, unbounded across
-  `Project`s. No lock object is introduced.
-- Private module repos work via per-Project scoped secrets once the engine-git-creds **mechanism
-  spike** confirms the v0.21.x path; dagmar's own private repo is the first dogfood case (and the
-  pressure that made this decision load-bearing).
-- The `ProjectManifest` grows an `os-eco` section (issues + expertise bindings as commands); the
-  LLM tool-set becomes partially manifest-derived. Realized in Phase 2 cognition after the
-  os-eco-tool **wrapping spike**.
-- Two spikes are filed out of this ADR: (a) engine-git-creds mechanism; (b) os-eco tool-wrapping
-  mechanism. Both are "design fixed, mechanism open."
+  gains an owner-ref pod watch + `metav1.Condition` writes + a per-Task lineage gate derived from
+  Runs sharing `spec.taskRef`. `Project` gains a finalizer (identity teardown).
+- Concurrency: one dispatching Run per Task (lineage-ordered), parallel across Tasks and
+  Projects. No lock object introduced; lineage is derived from Run status. A lost pod is detected
+  on reconcile and frees the Task (GAP-5).
+- Private module repos work via per-Project scoped secrets once the engine-git-creds mechanism
+  spike (`dagmar-2c68`) confirms the v0.21.x path **and** that it can satisfy the
+  no-standing-engine-cred invariant; dagmar's own private repo is the first dogfood case.
+- The `ProjectManifest` grows an os-eco section (issues + expertise bindings as commands); the
+  LLM tool-set becomes partially manifest-derived, contingent on the os-eco tool-wrapping spike
+  (`dagmar-e8f3`) confirming data-driven tool registration in the primitive.
+- Two spikes are filed: `dagmar-2c68` (engine-git-creds) and `dagmar-e8f3` (os-eco tool-wrapping).
 
 ## Deferred
 
 - **Event & trigger model** (Phase 3 autonomy, ADR-0012 §5) — a separate seed.
-- **The engine-git-creds mechanism spike** and the **os-eco tool-wrapping mechanism spike** —
-  resolved by prototype, then folded back as a note here.
-- **Cache-vol reclaim policy** (TTL / size) — a later increment once retention needs are concrete.
-- **Object-storage backend selection + `artifactRef` schema** — decided when the first increment
+- **`dagmar-2c68`** — engine-git-creds mechanism under Dagger v0.21.x (decides the mechanism AND
+  whether it can satisfy "the engine holds no standing credential").
+- **`dagmar-e8f3`** — os-eco tool-wrapping (decides primitive feasibility: data-driven tool
+  registration; then the hermeticity/argv mechanics).
+- **Cache-vol reclaim policy + ownership** (D4) — a later increment.
+- **Object-storage backend selection + `artifactRef` schema** (D11) — when the first increment
   outgrows CR-only state.
