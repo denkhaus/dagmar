@@ -104,8 +104,9 @@ func (r *RunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	// 3a. If the Project declares a GitCredentialsRef (private module ref, ADR-0013 §4 D10), the
 	// named Secret must exist in the Run's namespace — the controller projects it into the agent
 	// pod, and a missing Secret would leave the pod stuck Pending with no terminal signal.
-	// Existence check only: the PAT value never enters the controller (ADR-0007 — it flows
-	// pod→engine via the credential helper, not through the control plane).
+	// Existence check only: the controller never reads or logs the PAT (ADR-0007 — it flows
+	// pod→engine via the credential helper). The Get transiently deserializes the Secret object
+	// but the code never inspects .Data.
 	if project.Spec.GitCredentialsRef != nil {
 		secretName := project.Spec.GitCredentialsRef.Name
 		if err := r.Get(ctx, types.NamespacedName{Name: secretName, Namespace: run.Namespace}, &corev1.Secret{}); err != nil {
@@ -275,7 +276,7 @@ func agentPodFor(run *v1alpha1.Run, project *v1alpha1.Project, enginePod, podNam
 		apkPkgs = "kubectl curl git"
 		// $DAGMAR_GIT_PAT is single-quoted for the outer sh, so git stores it literally and it
 		// expands only when the helper runs at credential-fill time (inheriting the pod env).
-		preCall = `git config --global credential.helper '!f() { echo username=dagmar; echo password=$DAGMAR_GIT_PAT; }; f' && `
+		preCall = `git config --global credential.helper '!f() { echo username=dagmar; echo password="$DAGMAR_GIT_PAT"; }; f' && `
 	}
 	cmd := fmt.Sprintf(
 		`apk add --no-cache %s && `+

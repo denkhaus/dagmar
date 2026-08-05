@@ -60,8 +60,9 @@ spec:
                       Defaults to "token" when empty.
                     type: string
                   name:
-                    description: Name is the Secret name, in the Project's (Run's)
-                      namespace.
+                    description: |-
+                      Name is the Secret name, in the Project's (Run's) namespace. Required so an empty name is
+                      rejected at CRD admission rather than requeuing indefinitely (review-16 HOUSE-3).
                     type: string
                 required:
                 - name

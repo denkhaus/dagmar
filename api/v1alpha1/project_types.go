@@ -17,7 +17,9 @@ import (
 // Optional: unset ⇒ the module ref is treated as public (current Phase-0 behavior).
 // +kubebuilder:object:generate=true
 type GitCredentialsRef struct {
-	// Name is the Secret name, in the Project's (Run's) namespace.
+	// Name is the Secret name, in the Project's (Run's) namespace. Required so an empty name is
+	// rejected at CRD admission rather than requeuing indefinitely (review-16 HOUSE-3).
+	// +kubebuilder:validation:Required
 	Name string `json:"name"`
 
 	// Key is the key in the Secret holding the PAT/token. Defaults to "token" when empty.
