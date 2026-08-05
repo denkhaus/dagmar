@@ -1,0 +1,17 @@
+# Workspace toolset — `just bootstrap` provisions a consistent local + CI toolchain.
+# mise is auto-activated via ~/.zshrc; in CI, shims are put on PATH (see .github/workflows/ci.yml).
+# Not managed here: mulch (@os-eco/mulch-cli, a bun/npm package).
+[tools]
+# Keep aligned with the HIGHEST go.mod `go` directive — .dagger/go.mod declares 1.26.5 (the root
+# module declares 1.26.1); a 1.26.5 toolchain satisfies both with no GOTOOLCHAIN fetch.
+go = "1.26.5"
+just = "1.57.0"        # was drifting (local 1.51.0 vs CI 1.57.0)
+# ubi backend (direct GitHub releases) for these: the default aqua backend's
+# sigstore artifact-attestation misfires (cert identity "dotcom.releases.github.com"
+# ≠ expected …/release.yml workflow), so aqua rejects them.
+"ubi:golangci/golangci-lint" = "2.12.2"
+"ubi:evilmartians/lefthook" = "2.1.10"   # bump from local 1.13.6 (was unpinned @latest)
+"ubi:nushell/nushell" = { version = "0.113.1", exe = "nu" }   # binary is "nu"; exe tells ubi what to extract (for the .nu review/ci scripts)
+# betterleaks = gitleaks successor (same maintainer, Zach Rice). Drop-in: reads .gitleaks.toml /
+# GITLEAKS_CONFIG if present. Used by the lefthook pre-commit hook (lefthook.yml) + CI.
+"ubi:betterleaks/betterleaks" = "1.7.3"

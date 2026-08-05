@@ -12,6 +12,11 @@ bin-dir := justfile_directory() / "bin"
 # per-invocation: `just git-creds key=dev/other/path`.
 git-creds-key := "dev/dagmar/github_token"
 
+# bootstrap: install the pinned toolchain (mise.toml) — the local equivalent of CI's mise shims.
+# One-time follow-up after this: `lefthook install` to activate the git hooks (lefthook.yml).
+bootstrap:
+    mise install
+
 # install controller-gen into bin/ if missing (go-install-tool idiom)
 controller-gen:
     @mkdir -p {{bin-dir}}

@@ -1,0 +1,13 @@
+# lefthook config — git hooks for dagmar.
+# Activate once after `just bootstrap`:  `lefthook install`
+# (registers .git/hooks/* from this file; idempotent). See mise.toml for the pinned version.
+#
+# betterleaks (gitleaks successor) scans for secrets. Working-tree scan (`dir .`) is fast for this
+# repo and catches a secret before it's committed. If a legitimate string false-positives (e.g. an
+# example token in docs/), allowlist it in a .gitleaks.toml (betterleaks is drop-in compatible).
+pre-commit:
+  commands:
+    betterleaks:
+      # `mise exec --` so the shim resolves even when lefthook/git run non-interactively (not via
+      # the interactive ~/.zshrc that auto-activates mise).
+      run: mise exec -- betterleaks dir . -v
