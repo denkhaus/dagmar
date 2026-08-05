@@ -15,9 +15,9 @@ spec:
   moduleRef: github.com/denkhaus/dagmar
   # gitCredentialsRef: the repo is PRIVATE (2026-08-04). The engine fetches the module via the
   # #8805 git-credential path (ADR-0013 §4 D10): the controller projects this Secret's PAT into the
-  # agent pod and configures a headless git credential helper. Create the Secret out-of-band
-  # (the PAT is never committed): `just git-creds ghp_xxx` (fine-grained PAT, contents:read on
-  # github.com/denkhaus/dagmar).
+  # agent pod and configures a headless git credential helper. Create the Secret from gopass (the
+  # PAT is never committed, never on argv): `just git-creds` (fine-grained PAT, contents:read on
+  # github.com/denkhaus/dagmar; key dev/dagmar/github_token, see Justfile).
   gitCredentialsRef:
     name: dagmar-git-creds
     key: token

@@ -7,6 +7,10 @@
 controller-tools-version := "v0.21.0"
 engine-version := "0.21.8"
 bin-dir := justfile_directory() / "bin"
+# gopass key holding the fine-grained PAT (contents:read on github.com/denkhaus/dagmar) used to
+# fetch this private module. The PATH is not secret — the value lives encrypted in gopass. Override
+# per-invocation: `just git-creds key=dev/other/path`.
+git-creds-key := "dev/dagmar/github_token"
 
 # install controller-gen into bin/ if missing (go-install-tool idiom)
 controller-gen:
@@ -41,12 +45,15 @@ install: manifests
 apply-samples:
     kubectl apply -f config/samples/dagmar_v1alpha1_project.yaml -f config/samples/dagmar_v1alpha1_run.yaml
 
-# create/replace the dagmar-git-creds Secret (the private-module PAT) in the default namespace.
-# usage: just git-creds ghp_xxx  — fine-grained PAT, contents:read on github.com/denkhaus/dagmar.
+# create/replace the dagmar-git-creds Secret (the private-module PAT) in the default namespace,
+# piping the token gopass→kubectl so it NEVER touches argv or shell history. Requires the gopass
+# key (git-creds-key above) to hold a fine-grained PAT, contents:read on github.com/denkhaus/dagmar.
 # The PAT is never committed; it is projected into the agent pod + consumed by a headless git
 # credential helper (ADR-0013 §4 D10, the resolved #8805 mechanism).
-git-creds token:
-    kubectl create secret generic dagmar-git-creds --from-literal=token={{token}} -n default -o yaml --dry-run=client | kubectl apply -f -
+git-creds key=git-creds-key:
+    gopass show -o {{key}} | tr -d '\n' \
+        | kubectl create secret generic dagmar-git-creds --from-file=token=/dev/stdin -n default -o yaml --dry-run=client \
+        | kubectl apply -f -
 
 # run the controller locally against the current cluster's kubeconfig
 run: manifests
