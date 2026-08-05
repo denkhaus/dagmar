@@ -37,6 +37,12 @@ const (
 	// engine pod. Shared; created once.
 	agentRole = "dagmar-agent-exec"
 
+	// gitCredsEnvVar is the env var carrying the projected PAT into the agent pod; the headless
+	// git credential helper (set in agentPodFor) reads it at credential-fill time (ADR-0013 §4 D10).
+	gitCredsEnvVar = "DAGMAR_GIT_PAT"
+	// gitCredsDefaultKey is the Secret key assumed when Project.Spec.GitCredentialsRef.Key is empty.
+	gitCredsDefaultKey = "token"
+
 	// engineRequeueAfter is the requeue delay when the engine pod is not yet Ready (transient —
 	// the engine may still be rolling out at kind bringup).
 	engineRequeueAfter = 10 * time.Second
@@ -59,6 +65,7 @@ type RunReconciler struct {
 // +kubebuilder:rbac:groups=dagmar.denkhaus.io,resources=projects,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=pods/exec,verbs=create
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get
 // +kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;list;watch;create;update;patch
@@ -92,6 +99,22 @@ func (r *RunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	if project.Spec.ModuleRef == "" {
 		return ctrl.Result{}, r.failRun(ctx, run, "ModuleRefRequired",
 			"Project.Spec.ModuleRef is empty; it must name the dagmar module ref for `dagger call -m`")
+	}
+
+	// 3a. If the Project declares a GitCredentialsRef (private module ref, ADR-0013 §4 D10), the
+	// named Secret must exist in the Run's namespace — the controller projects it into the agent
+	// pod, and a missing Secret would leave the pod stuck Pending with no terminal signal.
+	// Existence check only: the PAT value never enters the controller (ADR-0007 — it flows
+	// pod→engine via the credential helper, not through the control plane).
+	if project.Spec.GitCredentialsRef != nil {
+		secretName := project.Spec.GitCredentialsRef.Name
+		if err := r.Get(ctx, types.NamespacedName{Name: secretName, Namespace: run.Namespace}, &corev1.Secret{}); err != nil {
+			if errors.IsNotFound(err) {
+				return ctrl.Result{}, r.failRun(ctx, run, "GitCredentialsSecretNotFound",
+					fmt.Sprintf("Project.Spec.GitCredentialsRef names Secret %q not found in namespace %q", secretName, run.Namespace))
+			}
+			return ctrl.Result{}, err
+		}
 	}
 
 	// 3b. ModuleFunction is the other load-bearing Phase-0 read: the function the agent pod calls.
@@ -242,12 +265,43 @@ func agentPodFor(run *v1alpha1.Run, project *v1alpha1.Project, enginePod, podNam
 	// RBAC), so a shell-metacharacter (;, $(), backtick) or even a space would be interpolated raw
 	// but is author-self-inflicted in Phase 0. This becomes a LIVE injection vector for
 	// agent-generated Runs (Phase 2) — the call shape must be built without a shell then.
+	// (The git-credential additions below are fixed controller strings, not author fields.)
+	apkPkgs, preCall := "kubectl curl", ""
+	if ref := project.Spec.GitCredentialsRef; ref != nil {
+		// Private module ref (ADR-0013 §4 D10, resolved): install git and configure a headless
+		// credential helper that emits the projected PAT. When the engine fetches the private
+		// module it queries this pod's `git credential fill`; the helper runs, emits the PAT, and
+		// the engine injects it as a session-scoped secret (it holds no standing credential).
+		apkPkgs = "kubectl curl git"
+		// $DAGMAR_GIT_PAT is single-quoted for the outer sh, so git stores it literally and it
+		// expands only when the helper runs at credential-fill time (inheriting the pod env).
+		preCall = `git config --global credential.helper '!f() { echo username=dagmar; echo password=$DAGMAR_GIT_PAT; }; f' && `
+	}
 	cmd := fmt.Sprintf(
-		`apk add --no-cache kubectl curl && `+
+		`apk add --no-cache %s && `+
+			preCall+
 			`curl -fsSL https://github.com/dagger/dagger/releases/download/v%s/dagger_v%s_linux_amd64.tar.gz | tar xz -C /usr/local/bin dagger && `+
 			`dagger call -m %s %s %s`,
-		daggerVersion, daggerVersion, project.Spec.ModuleRef, run.Spec.ModuleFunction, shellJoin(run.Spec.ModuleArgs),
+		apkPkgs, daggerVersion, daggerVersion, project.Spec.ModuleRef, run.Spec.ModuleFunction, shellJoin(run.Spec.ModuleArgs),
 	)
+	env := []corev1.EnvVar{
+		{Name: "_EXPERIMENTAL_DAGGER_RUNNER_HOST", Value: runnerHost},
+	}
+	if ref := project.Spec.GitCredentialsRef; ref != nil {
+		key := ref.Key
+		if key == "" {
+			key = gitCredsDefaultKey
+		}
+		env = append(env, corev1.EnvVar{
+			Name: gitCredsEnvVar,
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: ref.Name},
+					Key:                  key,
+				},
+			},
+		})
+	}
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      podName,
@@ -264,9 +318,7 @@ func agentPodFor(run *v1alpha1.Run, project *v1alpha1.Project, enginePod, podNam
 				Name:    "agent",
 				Image:   image,
 				Command: []string{"sh", "-c", cmd},
-				Env: []corev1.EnvVar{
-					{Name: "_EXPERIMENTAL_DAGGER_RUNNER_HOST", Value: runnerHost},
-				},
+				Env:     env,
 			}},
 		},
 	}

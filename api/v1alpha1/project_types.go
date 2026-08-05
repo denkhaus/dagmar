@@ -9,6 +9,22 @@ import (
 // are load-bearing Phase-0 reads). The full Project spec (os-eco binding, the three typed
 // credential classes, autonomy setting, ProjectManifest reference — CONTEXT.md) is added as the
 // control plane grows; field-home details are deferred to the control-plane-design seed.
+// GitCredentialsRef names the Secret holding the fine-grained PAT / deploy token the engine uses
+// to fetch this Project's private module ref (ADR-0013 §4 D10 — the #8805 git-credential path).
+// When set, the controller projects the token into the agent pod as an env var and configures a
+// headless git credential helper; the engine queries the pod's `git credential fill`, receives
+// the PAT, and injects it as a session-scoped secret for that fetch (it holds no standing cred).
+// Optional: unset ⇒ the module ref is treated as public (current Phase-0 behavior).
+// +kubebuilder:object:generate=true
+type GitCredentialsRef struct {
+	// Name is the Secret name, in the Project's (Run's) namespace.
+	Name string `json:"name"`
+
+	// Key is the key in the Secret holding the PAT/token. Defaults to "token" when empty.
+	// +optional
+	Key string `json:"key,omitempty"`
+}
+
 type ProjectSpec struct {
 	// Repo is the git repository URL dagmar operates on. Informational in Phase 0 (full
 	// clone/workspace model is Phase 2); recorded so dagmar-own can be registered as a Project.
@@ -26,6 +42,14 @@ type ProjectSpec struct {
 	// control-plane-design seed for the exact resolution mechanism.
 	// +optional
 	ModuleRef string `json:"moduleRef,omitempty"`
+
+	// GitCredentialsRef optionally names the Secret holding the PAT the engine uses to fetch
+	// this Project's private module ref (ADR-0013 §4 D10 — the resolved #8805 mechanism). When
+	// set, the controller projects the token into the agent pod + configures a headless git
+	// credential helper; when unset, the module ref is treated as public. Dogfood: dagmar-own
+	// carries dagmar-git-creds to read its own now-private module.
+	// +optional
+	GitCredentialsRef *GitCredentialsRef `json:"gitCredentialsRef,omitempty"`
 }
 
 // ProjectStatus holds the observed state of a Project. Minimal in Phase 0.

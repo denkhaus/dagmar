@@ -227,3 +227,100 @@ func TestReconcile_EngineNotReadyRequeues(t *testing.T) {
 		t.Errorf("engine not ready must requeue after %v, got %+v", engineRequeueAfter, res)
 	}
 }
+
+func TestReconcile_GitCredentialsRefProjectsPATAndHelper(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = v1alpha1.AddToScheme(scheme)
+	run := &v1alpha1.Run{
+		ObjectMeta: metav1.ObjectMeta{Name: "priv", Namespace: "default"},
+		Spec:       v1alpha1.RunSpec{ProjectRef: "dagmar-own", ModuleFunction: "probe-net"},
+	}
+	project := &v1alpha1.Project{
+		ObjectMeta: metav1.ObjectMeta{Name: "dagmar-own", Namespace: "default"},
+		Spec: v1alpha1.ProjectSpec{
+			Repo: "https://github.com/denkhaus/dagmar", ModuleRef: testModuleRef,
+			// Key empty ⇒ defaults to "token" (exercises the default-key path).
+			GitCredentialsRef: &v1alpha1.GitCredentialsRef{Name: "dagmar-git-creds"},
+		},
+	}
+	enginePod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "eng", Namespace: engineNamespace, Labels: map[string]string{engineLabelKey: engineLabelVal}},
+		Status:     corev1.PodStatus{Phase: corev1.PodRunning},
+	}
+	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "dagmar-git-creds", Namespace: "default"}}
+	cl := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&v1alpha1.Run{}).
+		WithObjects(project, enginePod, run, secret).Build()
+	r := &RunReconciler{Client: cl, Scheme: scheme}
+	ctx := context.Background()
+
+	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: "priv", Namespace: "default"}}); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	pod := &corev1.Pod{}
+	if err := cl.Get(ctx, types.NamespacedName{Name: "priv-agent", Namespace: "default"}, pod); err != nil {
+		t.Fatalf("agent pod not created: %v", err)
+	}
+	cmd := pod.Spec.Containers[0].Command[2]
+	for want, why := range map[string]string{
+		"apk add --no-cache kubectl curl git":            "git installed for the credential helper",
+		"git config --global credential.helper":          "headless git credential helper configured",
+		"echo password=$DAGMAR_GIT_PAT":                  "helper emits the projected PAT at fill time",
+		"dagger call -m " + testModuleRef + " probe-net": "module call still present",
+	} {
+		if !strings.Contains(cmd, want) {
+			t.Errorf("agent pod command missing %q (%s): %q", want, why, cmd)
+		}
+	}
+
+	// The PAT is projected from the Secret (default key "token"), never interpolated into the cmd.
+	var patEnv *corev1.EnvVar
+	for i := range pod.Spec.Containers[0].Env {
+		if pod.Spec.Containers[0].Env[i].Name == gitCredsEnvVar {
+			patEnv = &pod.Spec.Containers[0].Env[i]
+			break
+		}
+	}
+	if patEnv == nil {
+		t.Fatalf("agent pod env missing %q", gitCredsEnvVar)
+	}
+	if patEnv.ValueFrom == nil || patEnv.ValueFrom.SecretKeyRef == nil {
+		t.Fatalf("DAGMAR_GIT_PAT must be a secretKeyRef, got %+v", patEnv)
+	}
+	if sr := patEnv.ValueFrom.SecretKeyRef; sr.Name != "dagmar-git-creds" || sr.Key != gitCredsDefaultKey {
+		t.Errorf("secretKeyRef = {Name:%s, Key:%s}, want {dagmar-git-creds, %s}", sr.Name, sr.Key, gitCredsDefaultKey)
+	}
+}
+
+func TestReconcile_MissingGitCredentialsSecretIsTerminalFailed(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = v1alpha1.AddToScheme(scheme)
+	run := &v1alpha1.Run{
+		ObjectMeta: metav1.ObjectMeta{Name: "nocred", Namespace: "default"},
+		Spec:       v1alpha1.RunSpec{ProjectRef: "dagmar-own", ModuleFunction: "probe-net"},
+	}
+	project := &v1alpha1.Project{
+		ObjectMeta: metav1.ObjectMeta{Name: "dagmar-own", Namespace: "default"},
+		Spec: v1alpha1.ProjectSpec{
+			Repo: "x", ModuleRef: testModuleRef,
+			GitCredentialsRef: &v1alpha1.GitCredentialsRef{Name: "missing-creds"},
+		},
+	}
+	// No Secret "missing-creds" is seeded.
+	cl := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&v1alpha1.Run{}).WithObjects(project, run).Build()
+	r := &RunReconciler{Client: cl, Scheme: scheme}
+
+	res, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Name: "nocred", Namespace: "default"}})
+	if err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if res.Requeue || res.RequeueAfter != 0 {
+		t.Errorf("missing git-creds Secret must be terminal, got requeue %+v", res)
+	}
+	updated := &v1alpha1.Run{}
+	_ = cl.Get(context.Background(), types.NamespacedName{Name: "nocred", Namespace: "default"}, updated)
+	if updated.Status.Phase != v1alpha1.RunPhaseFailed {
+		t.Errorf("status phase = %q, want Failed (GitCredentialsSecretNotFound)", updated.Status.Phase)
+	}
+}
