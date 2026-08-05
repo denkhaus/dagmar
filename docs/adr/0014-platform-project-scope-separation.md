@@ -1,8 +1,11 @@
 # ADR-0014: Platform/project scope separation — gate-family module boundary
 
 Date: 2026-08-05
-Seed: dagmar-b8c2 (part of dagmar-80dd) · Status: **PROPOSED**
-Decided via grilling 2026-08-05. Resolves the gate-family abstraction-layer item: dagmar
+Seed: dagmar-b8c2 (part of dagmar-80dd) · Status: **ACCEPTED**
+Decided via grilling 2026-08-05; revised after dagmar-review 17
+(`docs/review/17-2026-08-05-cb32310-b8c2.md`, NEEDS-WORK-light → revised: GAP-1 mixed-scope
+`config` package split, SPEC-1 ADR-0010 §4 reconciliation, HOUSE-1/2 wording; then accepted).
+Resolves the gate-family abstraction-layer item: dagmar
 conflates platform-scope and project-scope code in one `.dagger` module, and the platform
 shortcircuits the abstraction a normal project uses (it calls dagmar-the-project's gate-family
 directly instead of by module-ref). Builds on ADR-0010 (Go module layout) and ADR-0009 §2 /
@@ -44,6 +47,15 @@ A **code-only boundary** (separate packages within one module) is rejected: the 
 still call its own functions, no addressable project module exists, and the abstraction (swap in
 a different project's module) cannot be expressed — the shortcuit persists structurally. The
 module boundary is the price of the abstraction being real.
+
+**Coherence with ADR-0010 §4 (review-17 SPEC-1).** ADR-0010 §4 says reusable workflow units are
+"extracted into separate Dagger modules **only when reuse crosses the dagmar boundary**." This ADR
+extracts gate + bootstrap **now**, before any cross-boundary reuse. The triggers are orthogonal and
+both hold: §4's trigger is **reuse** (don't fork a module until a second consumer exists); ADR-0014's
+trigger is **scope** (the platform/project conflation must be severed to make the abstraction real).
+Scope-separation is not a violation of §4's reuse-default — it is a different axis. (ADR-0010 §4
+also names `review` as a third workflow; it stays prospective — a third home is decided when review
+is real, not preempted here.)
 
 ### 2. Assignment (Q2)
 
@@ -89,17 +101,20 @@ the wrapper only when callers diverge or a conformance probe becomes economical.
 
 Because `dagmar-gate`/`dagmar-bootstrap` live ONLY in `.dagmar/` (project module) per Q2, the
 platform module (`.dagger/`) no longer has them — a `dagger call dagmar-gate` (no `-m`, hits the
-platform module) **structurally fails**. The module boundary ENFORCES the ref-based call; the
-shortcuit is structurally impossible. The abstraction is secured by structure, not just
-convention.
+platform module) **structurally fails**. The module boundary ENFORCES the **ref-based call** (not
+conformance — Q4 leaves "does the project expose the functions at all?" to ADR + naming now, a
+runtime probe later); the shortcuit is structurally impossible. The abstraction's *ref* is secured
+by structure; its *conformance* is secured by convention (Q4).
 
 The dogfood uses a **local ref now**: CI/in-loop call `-m .dagmar call dagmar-gate --source .`
 (path in the checked-out repo). This exercises the layer fully (platform calls the project module
 by ref, not its own function). The "deepest dogfood" — a published ref
 `-m github.com/denkhaus/dagmar/.dagmar@<ref>` (subpath-ref), treating dagmar-as-a-project exactly
 like an external project — is a later deepening, once dagmar is published and the
-exactly-external experience is to be validated (then also the subpath-ref prototype). Local now is
-real enough (shortcuit excluded); published is later.
+exactly-external experience is to be validated (then also the subpath-ref prototype). "Local now"
+proves the **abstraction** (platform calls the project module by ref, shortcuit excluded); it does
+**not** exercise the published subpath-ref mechanism, which is a different Dagger ref-resolver code
+path and stays wholly unvalidated until that prototype (review-17 HOUSE-2). Published is later.
 
 ### 6. Toolchain-rollout home — project-specific, no platform default (Q6 / D4)
 
@@ -143,6 +158,16 @@ over its bootstrap and is premature for a single project.
   `.dagmar/`, the manifest's `secrets` checkable stays, the CI/lefthook invocation becomes
   `-m .dagmar call dagmar-gate`. The centralization (one PR-readiness check incl. secret scan) is
   preserved; its placement is corrected by this ADR.
+- **The re-home is NOT a pure code move — `config` splits too (review-17 GAP-1).**
+  `.dagger/internal/workflows/gate.go` imports `dagger/dagmar/internal/config`
+  (`ParseManifest`/`ProjectManifest`/`Checkable`). Once `gate.go` moves to `.dagmar/` — a **new Go
+  module** whose path is not `dagger/dagmar` — Go's `internal/` rule makes that import unresolved:
+  `gate.go` will not compile against the platform's `internal/config`. The `config` package is itself
+  **mixed-scope** — `manifest.go` (`ProjectManifest`/`Checkable`/`ParseManifest`, PROJECT conformance,
+  ADR-0003) vs `config.go` (`OsEcoConfig`, PLATFORM runtime/env, ADR-0010 §8, prospective). So `config`
+  does not travel wholesale: manifest parsing → `.dagmar/`, `OsEcoConfig` → stays in `.dagger/`.
+  (`bootstrap.go` imports only the generated SDK + stdlib and travels clean.) The implementer of the
+  deferred split must split `config` alongside the move, or hit the `internal/` wall mid-move.
 - The platform's conformance contract becomes mechanical (does `.dagmar` expose
   `dagmar-bootstrap`/`dagmar-gate`?) rather than implicit.
 
