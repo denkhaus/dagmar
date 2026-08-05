@@ -6,7 +6,10 @@ executor:
   context_window: 200000
   config:
     harness: claude-native
-spawn: true
+# false: this is an advice-only reviewer (read + write one report). It must do the review itself
+# with its own 200k context — spawning sub-agents caused repeated double-delegation stalls
+# (the nested agent produced no output; the report never landed — reviews 15 & 17). Forbid it.
+spawn: false
 os_env:
   type: caller_process
   cwd: .
