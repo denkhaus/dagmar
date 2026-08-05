@@ -5,7 +5,10 @@ Seed: dagmar-67bc (part of dagmar-80dd) · Status: **ACCEPTED**
 Decided via grilling 2026-08-04; revised after dagmar-review 15
 (`docs/review/15-2026-08-04-2b35fad-67bc.md`, NEEDS-WORK → revised: FIX-1 hermeticity model,
 GAP-1 Task-granularity, GAP-2/3 engine-git-creds honesty, GAP-4 os-eco feasibility, GAP-5
-stale-pointer recovery, HOUSE/SPEC sharpening; then accepted). Resolves the wayfinder
+stale-pointer recovery, HOUSE/SPEC sharpening; then accepted). D10's engine-git-creds spike
+(`dagmar-2c68`) was resolved 2026-08-05: the `#8805` client-credential mechanism confirmed, the
+no-standing-engine-cred invariant holds, ADR-0007 consistency lifted from conditional to settled.
+Resolves the wayfinder
 "Kubernetes control-plane design (CRD/operator vs. controller+workers; dispatch; concurrency)"
 item and is the design home for the control-plane internals ADR-0012 deferred out of Phase 0.
 
@@ -119,18 +122,33 @@ controller sees first.
   the default covers the common case and the override is an escape hatch for the rare persona
   that genuinely needs a different harness — it does not re-conflate, because the platform still
   owns the default (review-15 HOUSE-3).
-- **`engine-git-creds` (D10):** per-Project scoped credentials — `Project.spec.gitCredentialsRef`
-  → a `Secret` in the `Project`'s namespace (deploy token / fine-grained PAT, `contents: read`
-  on the module repo only). **Honesty about ADR-0007 (review-15 GAP-2/GAP-3):** the singleton
-  engine (a shared DaemonSet in a system namespace) consumes this credential to clone the private
-  capability module — a path ADR-0007 never contemplated, sitting outside both of its layers (the
-  per-Project namespace does not bound the engine; the credential is an engine-process use, not a
-  per-Run Sandbox projection of the `vcs`/`os-eco`/`llm` classes). This ADR therefore does **not**
-  claim ADR-0007/A1 consistency as settled. The invariant the spike must preserve: the engine
-  holds **no standing credential**; per-dispatch injection is ephemeral, never visible across
-  Projects, confined to one Project's scoped token. "Engine holds none" is a **desired invariant,
-  spike-gated, not a premise.** ADR-0007/A1 consistency is conditional on spike `dagmar-2c68`
-  confirming a mechanism that can achieve it.
+- **`engine-git-creds` (D10) — RESOLVED (spike `dagmar-2c68`, 2026-08-05):** per-Project scoped
+  credentials whose **source, projection, delivery, and invariant** are confirmed against primary
+  sources (Dagger PR #8805 + v0.14.0 release notes; v0.21.8 generated API types; the
+  remote-repositories doc). The earlier "spike-gated / conditional on ADR-0007" caveat is lifted.
+  - **Source (unchanged):** `Project.spec.gitCredentialsRef` → a `Secret` in the `Project`'s
+    namespace (deploy token / fine-grained PAT, `contents: read` on the module repo only). Dogfood:
+    `dagmar`-as-a-Project carries `dagmar-git-creds` to read its own now-private module.
+  - **Projection:** the controller projects the `Secret` into the agent pod as an env var and
+    configures a headless `git` credential helper in the pod's gitconfig that emits that PAT
+    (non-interactive — no credential-manager GUI).
+  - **Delivery (the corrected mechanism):** when the agent pod runs `dagger call -m <moduleRef>`,
+    the engine queries the **client pod's** `git credential fill` for the repo's host, receives the
+    PAT, and **injects it back into that session as a Dagger secret** (PR #8805, "PAT support —
+    private git on http/https", shipped v0.14.0, present in v0.21.8). The engine then fetches the
+    private module source with that session-scoped secret. This is module-source loading (Path A)
+    — distinct from in-function `dag.Git(url, HTTPAuthToken: *Secret)` (Path B), which does **not**
+    apply to `-m` module loading.
+  - **Invariant holds — GAP-2/GAP-3 resolved FAVORABLY:** the engine holds **no standing
+    credential**. The PAT is resolved client-side, lives only within the one session that requested
+    it, is never persisted by the engine, and Dagger secrets are isolated across client sessions
+    (per-session/per-client scope). Each Project's agent pod brings its own PAT, so there is no
+    cross-Project leakage. This composes cleanly with ADR-0007/A1's per-Project namespace boundary:
+    the cred originates in one Project's namespace `Secret`, is projected into that Project's pod,
+    and is consumed transiently by the engine within that pod's session.
+  - **Implementation TODO (not a design decision):** the exact headless credential-helper wiring in
+    the agent-pod image (env var → `credential.helper '!f() { …; }'`, or a netrc) is settled in the
+    dispatch-vertical implementation increment, not here.
 
 ### 5. State & persistence — hybrid CRs + object-storage; os-eco as manifest-declared tool-ports (D11, D12)
 
@@ -206,19 +224,19 @@ Hermeticity (ADR-0011) is preserved by five rules:
 - Concurrency: one dispatching Run per Task (lineage-ordered), parallel across Tasks and
   Projects. No lock object introduced; lineage is derived from Run status. A lost pod is detected
   on reconcile and frees the Task (GAP-5).
-- Private module repos work via per-Project scoped secrets once the engine-git-creds mechanism
-  spike (`dagmar-2c68`) confirms the v0.21.x path **and** that it can satisfy the
-  no-standing-engine-cred invariant; dagmar's own private repo is the first dogfood case.
+- Private module repos work via the confirmed `#8805` mechanism (spike `dagmar-2c68` resolved
+  2026-08-05): the agent pod supplies a per-Project PAT through a headless `git credential`
+  helper; the engine injects it as a session-scoped secret for that fetch and holds no standing
+  credential (see §4 D10). dagmar's own private repo is the first dogfood case.
 - The `ProjectManifest` grows an os-eco section (issues + expertise bindings as commands); the
   LLM tool-set becomes partially manifest-derived, contingent on the os-eco tool-wrapping spike
   (`dagmar-e8f3`) confirming data-driven tool registration in the primitive.
-- Two spikes are filed: `dagmar-2c68` (engine-git-creds) and `dagmar-e8f3` (os-eco tool-wrapping).
+- One spike remains open: `dagmar-e8f3` (os-eco tool-wrapping). `dagmar-2c68` (engine-git-creds) is
+  resolved — see §4 D10.
 
 ## Deferred
 
 - **Event & trigger model** (Phase 3 autonomy, ADR-0012 §5) — a separate seed.
-- **`dagmar-2c68`** — engine-git-creds mechanism under Dagger v0.21.x (decides the mechanism AND
-  whether it can satisfy "the engine holds no standing credential").
 - **`dagmar-e8f3`** — os-eco tool-wrapping (decides primitive feasibility: data-driven tool
   registration; then the hermeticity/argv mechanics).
 - **Cache-vol reclaim policy + ownership** (D4) — a later increment.
