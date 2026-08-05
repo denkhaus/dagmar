@@ -1,9 +1,10 @@
-# dagmar's own CI (Phase 1, ADR-0012 §4) — the always-Dagger gate-family.
+# dagmar's own CI (Phase 1, ADR-0012 §4) — the always-Dagger gate-family + a secret scan.
 #
-# Every push/PR runs `dagger call dagmar-gate --source .`, which reads .dagmar/project.yaml and
-# runs the declared checkables (controller build/test/vet/gofmt + dagger-module build/test/vet)
-# in a golang:1.26 container. dagmar-gate is the same function the coder-Loop will reuse in-loop
-# (Phase 2) — one checkable, two consumers (CONTEXT.md "reused checkable").
+# Tool versions are pinned in mise.toml (the single source of truth, shared with local dev via
+# `just bootstrap`). The secrets job installs mise, runs `mise install`, and puts mise's shims on
+# GITHUB_PATH so the betterleaks invocation resolves the pinned version — CI <-> local drift is
+# structurally impossible. dagmar runs on GitHub Actions, so the auto-injected GITHUB_TOKEN is
+# used directly (no Forgejo ACTIONS_STEP_PROXY_TOKEN rename dance, unlike the forgejo-cli CI).
 name: CI
 
 on:
@@ -13,6 +14,10 @@ on:
 
 jobs:
   gate:
+    # dagmar's build/test/vet/gofmt — the always-Dagger gate (ADR-0012 §4): every push/PR runs
+    # `dagger call dagmar-gate --source .`, which reads .dagmar/project.yaml and runs the declared
+    # checkables in a golang:1.26 container. Same function the coder-Loop reuses in-loop (Phase 2).
+    # Self-contained (dagger runs its own golang container), so it does NOT need the mise toolchain.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,3 +29,24 @@ jobs:
           version: "0.21.8"
           verb: call
           args: dagmar-gate --source .
+
+  secrets:
+    # Secret scan via betterleaks (gitleaks successor, same maintainer) on the pinned mise
+    # toolchain. Full-history scan (fetch-depth: 0) catches any secret ever committed.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install mise + tools (versions pinned in mise.toml)
+        env:
+          # Auto-injected on GitHub Actions; passed to mise so the ubi backend's GitHub-release
+          # downloads (betterleaks et al.) aren't rate-limited.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          curl -L https://mise.run | sh
+          "$HOME/.local/bin/mise" install
+          echo "$HOME/.local/share/mise/shims" >> "$GITHUB_PATH"
+
+      - run: betterleaks git . -v
