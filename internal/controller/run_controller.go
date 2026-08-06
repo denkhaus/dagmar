@@ -342,7 +342,8 @@ func agentPodFor(run *v1alpha1.Run, project *v1alpha1.Project, enginePod, podNam
 // (ADR-0013 D5). The mutator receives the freshly-fetched status; run.Generation is captured for
 // ObservedGeneration.
 func (r *RunReconciler) patchStatus(ctx context.Context, run *v1alpha1.Run, mutate func(*v1alpha1.RunStatus)) error {
-	for attempt := 0; attempt < statusPatchAttempts; attempt++ {
+	var lastErr error
+	for range statusPatchAttempts {
 		fresh := &v1alpha1.Run{}
 		if err := r.Get(ctx, client.ObjectKeyFromObject(run), fresh); err != nil {
 			return fmt.Errorf("get run for status patch: %w", err)
@@ -350,20 +351,29 @@ func (r *RunReconciler) patchStatus(ctx context.Context, run *v1alpha1.Run, muta
 		base := fresh.DeepCopy()
 		mutate(&fresh.Status)
 		if err := r.Status().Patch(ctx, fresh, client.MergeFrom(base)); err != nil {
-			if errors.IsConflict(err) && attempt < statusPatchAttempts-1 {
-				continue // re-Get + repatch
+			// Retry only on Conflict (optimistic concurrency — a concurrent reconcile changed the
+			// Run between our Get and Patch). A non-conflict error is surfaced immediately.
+			if !errors.IsConflict(err) {
+				return fmt.Errorf("patch run status: %w", err)
 			}
-			return fmt.Errorf("patch run status: %w", err)
+			lastErr = err
+			continue // re-Get + repatch
 		}
 		return nil
 	}
-	return fmt.Errorf("patch run status: exhausted %d conflict retries", statusPatchAttempts)
+	return fmt.Errorf("patch run status: %d conflicts in a row (last: %w)", statusPatchAttempts, lastErr)
 }
 
 // reconcileStatus mirrors the observed agent-pod phase into the pinned condition set (ADR-0013 D5)
 // + the derived Phase + AgentPodName. Called once the pod is observed (validation has passed, so
 // Accepted=True). podPhase "" (pod just created, not yet Pending/Running) is treated as dispatched-
 // but-waiting → Progressing=False, Phase=Pending (distinct from Running, which sets Progressing=True).
+//
+// Succeeded/Failed are only ever set True, never reset False here. That is correct because agent
+// pods run RestartPolicy: Never (agentPodFor) — a terminal phase is sticky, so a pod cannot move
+// Succeeded↔Failed and the two can never both be True. Phase-2 pod retry/recreation would need to
+// actively clear the stale terminal condition first, or phaseFromConditions would silently prefer
+// Succeeded.
 func (r *RunReconciler) reconcileStatus(ctx context.Context, run *v1alpha1.Run, podPhase corev1.PodPhase, reason, message string) error {
 	return r.patchStatus(ctx, run, func(s *v1alpha1.RunStatus) {
 		gen := run.Generation

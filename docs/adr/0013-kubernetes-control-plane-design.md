@@ -76,16 +76,24 @@ owner reference.
 > RoleBinding `dagmar-agent-exec` in the engine namespace — the latter is cross-namespace, so NOT
 > owner-ref'd to the Run, a documented leak carried over from dagmar-67bc). A Run- or Project-level
 > finalizer that deleted these shared-named resources would **break sibling Runs** in the same
-> namespace. Per-Project namespaces are not provisioned either (Runs run in the Project's namespace,
-> `default`), and there is no `ProjectReconciler`. So neither a Run- nor Project-level finalizer can
-> cleanly tear down identity today. D4 is unblocked by the identity-refactor seed (make identity
-> per-Run-named, OR provision per-Project namespaces + a `ProjectReconciler`); until then the
-> engine-namespace Role/RoleBinding leak remains the documented interim gap. (Mirrors the ADR-0014
-> GAP-1 interim-note honesty pattern: the divergence is on record, not silent.)
+> namespace — and this break is **not hypothetical**: the shared-named SA is itself controller-owner-ref'd
+> to its *creating* Run (`ensureAgentIdentity`), so deleting that Run **already cascades via k8s GC
+> today** — the SA vanishes and every sibling Run's pods (which run as that SA) lose their identity
+> (admission failures, broken exec-into-engine). No finalizer is required for the harm; the identity
+> refactor must also drop or re-scope that SA owner-ref. Per-Project namespaces are not provisioned
+> either (Runs run in the Project's namespace, `default`), and there is no `ProjectReconciler`. So
+> neither a Run- nor Project-level finalizer can cleanly tear down identity today. D4 is unblocked by
+> the identity-refactor seed (make identity per-Run-named, OR provision per-Project namespaces + a
+> `ProjectReconciler` — either way also dropping/re-scoping the SA controller owner-ref so its GC no
+> longer cascades); until then the engine-namespace Role/RoleBinding leak + the SA-owner-ref GC
+> sibling-break remain the documented interim gaps. (Mirrors the ADR-0014 GAP-1 interim-note honesty
+> pattern: the divergence is on record, not silent.)
 
 **Status conditions (D5):** standard `metav1.Condition` with a pinned minimal set, grown
 deliberately: `Run` {Accepted, Progressing, Succeeded, Failed}; `Project` {Provisioned, Ready}.
-Idiomatic, k9s-readable, carries reason/message/lastTransition.
+Idiomatic, k9s-readable, carries reason/message/lastTransition. `Status.Phase` is RETAINED as a
+derived back-compat summary (`phaseFromConditions`); the conditions are authoritative — a rejection
+and a pod-failure both surface `Phase=Failed` but differ on `Accepted` (False vs True).
 
 ### 3. Dispatch concurrency & lineage — per-Task lineage serialization; parallel across Tasks/Projects (D6, D7)
 

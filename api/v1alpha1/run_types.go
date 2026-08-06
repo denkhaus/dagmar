@@ -52,8 +52,9 @@ type RunSpec struct {
 // (ADR-0012 §2 SPEC-1: requeue/error-backoff/finalizers deferred to the control-plane-design
 // seed).
 type RunStatus struct {
-	// Phase is the high-level lifecycle phase (Pending|Running|Succeeded|Failed), derived from
-	// the owned agent pod's phase.
+	// Phase is the high-level lifecycle phase (Pending|Running|Succeeded|Failed), DERIVED from the
+	// condition set via phaseFromConditions (a read-optimized summary for k9s/back-compat; the
+	// RunCondition* types are the source of truth, ADR-0013 D5).
 	// +optional
 	Phase string `json:"phase,omitempty"`
 

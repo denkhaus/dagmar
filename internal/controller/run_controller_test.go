@@ -134,6 +134,10 @@ func TestReconcile_MirrorsSucceededPodPhase(t *testing.T) {
 	if updated.Status.Phase != v1alpha1.RunPhaseSucceeded {
 		t.Errorf("status phase = %q, want %q", updated.Status.Phase, v1alpha1.RunPhaseSucceeded)
 	}
+	// D5: the Succeeded terminal sets Succeeded=True, Progressing=False, Accepted=True (ran + succeeded).
+	assertCondition(t, updated, v1alpha1.RunConditionSucceeded, metav1.ConditionTrue)
+	assertCondition(t, updated, v1alpha1.RunConditionProgressing, metav1.ConditionFalse)
+	assertCondition(t, updated, v1alpha1.RunConditionAccepted, metav1.ConditionTrue)
 }
 
 func TestReconcile_EmptyModuleRefIsTerminalFailed(t *testing.T) {
@@ -370,14 +374,19 @@ func TestReconcile_WritesPinnedConditionSet(t *testing.T) {
 		t.Errorf("(b) phase = %q, want Running", updated.Status.Phase)
 	}
 
-	// (c) Pod Succeeded → Succeeded=True, Progressing=False, Phase=Succeeded.
-	setPodPhase(t, cl, podKey, corev1.PodSucceeded)
+	// (c) Pod Failed → Failed=True, Accepted STAYS True (ran-but-failed — distinct from a rejection
+	// where Accepted=False), Progressing=False, Phase=Failed. AgentPodName is kept.
+	setPodPhase(t, cl, podKey, corev1.PodFailed)
 	mustReconcile(t, ctx, r, req)
 	updated = fetchRun(t, cl, key)
-	assertCondition(t, updated, v1alpha1.RunConditionSucceeded, metav1.ConditionTrue)
+	assertCondition(t, updated, v1alpha1.RunConditionAccepted, metav1.ConditionTrue)
+	assertCondition(t, updated, v1alpha1.RunConditionFailed, metav1.ConditionTrue)
 	assertCondition(t, updated, v1alpha1.RunConditionProgressing, metav1.ConditionFalse)
-	if updated.Status.Phase != v1alpha1.RunPhaseSucceeded {
-		t.Errorf("(c) phase = %q, want Succeeded", updated.Status.Phase)
+	if updated.Status.Phase != v1alpha1.RunPhaseFailed {
+		t.Errorf("(c) phase = %q, want Failed", updated.Status.Phase)
+	}
+	if updated.Status.AgentPodName != "conds-agent" {
+		t.Errorf("(c) AgentPodName = %q, want conds-agent (pod-Failed keeps the pod name)", updated.Status.AgentPodName)
 	}
 }
 
