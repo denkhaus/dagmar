@@ -19,7 +19,10 @@ import (
 // Dagmar is dagmar-as-a-Project's main Dagger object (ADR-0014). It carries no per-Project
 // bound state: the gate-family methods take the Project source per call. (Distinct from the
 // platform module's Dagmar object in .dagger/, which binds a target Project + os-eco config;
-// the name collision is benign — the two modules are path-addressed, -m .dagger vs -m .dagmar.)
+// the inter-module name collision is benign — the two modules are path-addressed, -m .dagger
+// vs -m .dagmar.) The dagger.json `name: "dagmar"` (not "dagmar-project") is forced: Dagger
+// derives the main object type from `name` (kebab→CamelCase), so it must match `type Dagmar`;
+// the go.mod path `dagger/dagmar-project` and the checkable name differ but do not collide.
 type Dagmar struct{}
 
 // DagmarBootstrap is dagmar's gate-family PREPARE step (ADR-0009 §2 / ADR-0012 §4): an

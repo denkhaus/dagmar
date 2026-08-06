@@ -265,7 +265,8 @@ func (m *Dagmar) Probe(ctx context.Context,
 // no-network option (ContainerWithExecOpts has no network/egress field). This establishes
 // the residual-risk fact that ADR-0011 consciously accepts: tool-set exclusion is NOT a hard
 // network guarantee (a raw exec path can still reach the network). LLM-free.
-// (cbb8-style spike; to be refactored into workflows/ later — ADR-0010 Consequences.)
+// (cbb8-style spike; to be refactored into a platform workflows/ package if/when one is
+// introduced — the gate-family workflows/ moved to the .dagmar project module at ADR-0014.)
 func (m *Dagmar) ProbeNet(ctx context.Context) (string, error) {
 	// End-to-end reachability (DNS + TCP + HTTP) to a stable, low-risk endpoint from inside
 	// a container exec — the same kind of exec a hermetic LLM Loop / checkable would run.
@@ -303,7 +304,8 @@ func (m *Dagmar) ProbeNet(ctx context.Context) (string, error) {
 // If readsame sees the marker AND readdiff does not, name-based isolation is CONFIRMED (the
 // ADR-0008 §3 claim holds locally); the remaining cross-Project concern is then purely the
 // controller's allocation of distinct names (a control-plane guarantee). LLM-free.
-// (cbb8/d8f0-style spike; to be refactored into workflows/ later — ADR-0010 Consequences.)
+// (cbb8/d8f0-style spike; to be refactored into a platform workflows/ package if/when one is
+// introduced — the gate-family workflows/ moved to the .dagmar project module at ADR-0014.)
 func (m *Dagmar) ProbeCache(ctx context.Context,
 	// which leg of the test to run: write | readsame | readdiff
 	mode string,
