@@ -15,3 +15,8 @@ just = "1.57.0"        # was drifting (local 1.51.0 vs CI 1.57.0)
 # betterleaks = gitleaks successor (same maintainer, Zach Rice). Drop-in: reads .gitleaks.toml /
 # GITLEAKS_CONFIG if present. Used by the lefthook pre-commit hook (lefthook.yml) + CI.
 "ubi:betterleaks/betterleaks" = "1.7.3"
+# The Dagger CLI itself. Pinned to the SAME version as the engine (dagger.json engineVersion
+# v0.21.8) — CLI/engine skew across v0.21.x is unsupported. Needed locally so the lefthook
+# pre-push hook (`mise exec -- dagger call …`) resolves the shim in lefthook's non-interactive
+# shell. Single source: the gate container installs it too (Dagger-cached, never invoked there).
+"ubi:dagger/dagger" = "v0.21.8"

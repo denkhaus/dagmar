@@ -11,3 +11,13 @@ pre-commit:
       # `mise exec --` so the shim resolves even when lefthook/git run non-interactively (not via
       # the interactive ~/.zshrc that auto-activates mise).
       run: mise exec -- betterleaks dir . -v
+
+pre-push:
+  commands:
+    gate:
+      # The authoritative gate (all checkables incl. the secret scan) before pushing. Heavy
+      # (dagger + containers) but pre-push, not per-commit — catches a broken/secret-bearing push
+      # before it wastes a CI run.
+      # `mise exec --` so the dagger shim resolves under lefthook's non-interactive shell
+      # (dagger CLI is in mise.toml, pinned to the engine version).
+      run: mise exec -- dagger call -m .dagmar dagmar-gate --source .

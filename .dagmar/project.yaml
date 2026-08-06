@@ -5,9 +5,12 @@
 # mechanical self-verification the always-Dagger wrapper dagmar-gate runs (manifest = what,
 # dagmar-gate = how).
 #
-# `dagger call dagmar-gate --source .` runs the checkables below in a golang:1.26 container.
-# Both modules build in MODULE MODE in the gate container (only the repo is mounted — no parent
-# go.work — so no GOWORK=off is needed).
+# `dagger call -m .dagmar dagmar-gate --source .` runs the checkables below in a debian container
+# with the mise.toml toolchain rolled out by dagmar-bootstrap (go + betterleaks via mise — mise.toml
+# is the single tool source for local dev, CI-direct, and the gate). The gate-family itself lives
+# in THIS module (.dagmar/, ADR-0014); the platform invokes it by ref (`-m .dagmar`).
+# All three Go modules build in MODULE MODE in the gate container (only the repo is mounted — no
+# parent go.work — so no GOWORK=off is needed).
 
 checkables:
   # The Kubernetes control-plane root module (github.com/denkhaus/dagmar): the controller + CRD
@@ -16,8 +19,24 @@ checkables:
     workdir: .
     command: go build ./... && go vet ./... && go test ./... && test -z "$(gofmt -l .)"
 
-  # The .dagger execution module (dagger/dagmar). The generated bindings (dagger.gen.go,
-  # internal/dagger/) are committed (see .dagger/.gitattributes), so this builds in CI.
+  # The .dagger PLATFORM execution module (dagger/dagmar): Up/DeployEngine/Probe*/Sandbox. The
+  # generated bindings (dagger.gen.go, internal/dagger/) are committed (see .dagger/.gitattributes),
+  # so this builds in CI. The gate-family NO LONGER lives here (it moved to .dagmar at ADR-0014).
   - name: dagger-module
     workdir: .dagger
     command: go build ./... && go vet ./... && go test ./...
+
+  # The .dagmar PROJECT module (dagger/dagmar-project): dagmar-bootstrap + dagmar-gate + the
+  # manifest parser — the gate-family conformance contract (ADR-0014). Self-builds the gate's own
+  # module so a broken gate is caught BY the gate. Generated bindings committed (see
+  # .dagmar/.gitattributes).
+  - name: dagmar-project
+    workdir: .dagmar
+    command: go build ./... && go vet ./... && go test ./...
+
+  # Secret scan via betterleaks (gitleaks successor). betterleaks is provided by mise (rolled out
+  # by dagmar-bootstrap); `dir .` scans the working tree (no git dep). Centralized here so the gate
+  # — the single PR-readiness check (CI + in-loop self-verification) — includes secret detection.
+  - name: secrets
+    workdir: .
+    command: betterleaks dir .

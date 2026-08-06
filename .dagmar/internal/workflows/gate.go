@@ -7,23 +7,22 @@ import (
 	"path"
 	"strings"
 
-	"dagger/dagmar/internal/config"
-	"dagger/dagmar/internal/dagger"
+	"dagger/dagmar-project/internal/config"
+	"dagger/dagmar-project/internal/dagger"
 )
-
-// gateImage is the Go toolchain the gate runs checkables in. Pinned to a specific minor for
-// reproducibility (review-14 GAP-3); 1.26.5 satisfies both dagmar modules (root go 1.26.1,
-// .dagger go 1.26.5). Bump deliberately when the modules' go directive advances.
-const gateImage = "golang:1.26.5"
 
 // Gate is dagmar-gate: the always-Dagger verify wrapper that runs the manifest-declared
 // checkables (ADR-0003 = what, gate = how — review-11 GAP-3). It reads `.dagmar/project.yaml`
-// from the source, runs each checkable in a golang container, and returns a summary; a non-zero
-// checkable aborts the gate with an error (so CI fails). Networked container — the gate is the
-// deterministic-networked layer (ADR-0011); hermeticity is the LLM-loop constraint, not the gate's.
+// from the source, runs each checkable in the mise-bootstrapped container (bootstrapBase —
+// debian + the mise.toml toolchain), and returns a summary; a non-zero checkable aborts the
+// gate with an error (so CI fails). Pure VERIFY — it does not roll out the toolchain itself
+// (dagmar-bootstrap does; the gate reuses that base as a Dagger-cached layer). Networked container
+// — the gate is the deterministic-networked layer (ADR-0011); hermeticity is the LLM-loop
+// constraint, not the gate's.
 //
-// dagmar-gate is reused in CI (GitHub Actions: `dagger call dagmar-gate --source .`) AND in-loop
-// (coder self-verification, Phase 2).
+// dagmar-gate is reused in CI (GitHub Actions: `dagger call -m .dagmar dagmar-gate --source .`)
+// AND in-loop (coder self-verification, Phase 2). The manifest parser is project-local
+// (internal/config, ADR-0014) — see config/manifest.go for why it is not a platform cross-dep.
 func Gate(ctx context.Context, source *dagger.Directory) (string, error) {
 	raw, err := source.File(".dagmar/project.yaml").Contents(ctx)
 	if err != nil {
@@ -55,9 +54,10 @@ func Gate(ctx context.Context, source *dagger.Directory) (string, error) {
 // The exit code is captured explicitly (DAGMAR_EXIT) with Expect=Any so a non-zero exit yields
 // the output rather than an opaque exec error.
 func runCheckable(ctx context.Context, source *dagger.Directory, c config.Checkable) (string, int, error) {
-	ctr := dagger.Connect().Container().
-		From(gateImage).
-		WithMountedDirectory("/src", source).
+	// Derive from the mise-bootstrapped base (bootstrapBase: tools on PATH via mise shims). The
+	// bootstrap layer is a Dagger cache hit once realized by dagmar-bootstrap or a prior checkable.
+	// Override workdir to the checkable's (bootstrapBase mounts /src + sets workdir /src).
+	ctr := bootstrapBase(source).
 		WithWorkdir(path.Join("/src", c.Workdir))
 	for k, v := range c.Env {
 		ctr = ctr.WithEnvVariable(k, v)

@@ -1,6 +1,14 @@
-// manifest.go — ProjectManifest types + parsing (ADR-0003). See config/doc.go for the package
-// doc. This file is PURE (no Dagger import) so it is unit-testable without an engine; reading the
-// manifest bytes out of a *dagger.Directory is a Dagger I/O concern in workflows.Gate.
+// manifest.go — ProjectManifest types + parsing (ADR-0003). PURE (no Dagger import) → unit-
+// testable without an engine; reading the manifest bytes out of a *dagger.Directory is a Dagger
+// I/O concern in workflows.Gate.
+//
+// ADR-0014 scope note: the manifest SCHEMA is platform authority — projects author instances,
+// not the types. It lives in the PROJECT module anyway because Dagger loads each module in
+// source isolation: a project→platform Go dep (relative `replace` to a sibling dir) cannot
+// resolve at module-load time (the sibling is absent from the load context). So the canonical
+// schema travels with the gate that consumes it. Authority is enforced by convention + the
+// future conformance probe (ADR-0014 Q4); when a second Project needs the parser, extract it
+// into a PUBLISHED shared library both modules depend on by version (not relative replace).
 package config
 
 import (

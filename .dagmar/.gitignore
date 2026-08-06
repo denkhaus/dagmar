@@ -1,0 +1,5 @@
+# Generated bindings (dagger.gen.go, internal/dagger/) are COMMITTED, not ignored: a fresh CI
+# checkout must be able to load the project module + the dagmar-gate `dagmar-project` checkable
+# must `go build` them. The .gitattributes marks them linguist-generated so GitHub hides them from
+# diffs/stats. Regenerate via `dagger develop` after signature changes, then commit the result.
+/.env

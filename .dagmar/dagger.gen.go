@@ -17,7 +17,7 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.40.0"
 	"go.opentelemetry.io/otel/trace"
 
-	"dagger/dagmar/internal/dagger"
+	"dagger/dagmar-project/internal/dagger"
 
 	"github.com/dagger/querybuilder"
 )
@@ -60,35 +60,11 @@ func convertSlice[I any, O any](in []I, f func(I) O) []O {
 }
 
 func (r Dagmar) MarshalJSON() ([]byte, error) {
-	var concrete struct {
-		Project *dagger.Directory
-		OsEco   OsEcoBinding
-	}
-	concrete.Project = r.Project
-	concrete.OsEco = r.OsEco
-	return json.Marshal(&concrete)
-}
-
-func (r *Dagmar) UnmarshalJSON(bs []byte) error {
-	var concrete struct {
-		Project *dagger.Directory
-		OsEco   OsEcoBinding
-	}
-	err := json.Unmarshal(bs, &concrete)
-	if err != nil {
-		return err
-	}
-	r.Project = concrete.Project
-	r.OsEco = concrete.OsEco
-	return nil
-}
-
-func (r Sandbox) MarshalJSON() ([]byte, error) {
 	var concrete struct{}
 	return json.Marshal(&concrete)
 }
 
-func (r *Sandbox) UnmarshalJSON(bs []byte) error {
+func (r *Dagmar) UnmarshalJSON(bs []byte) error {
 	var concrete struct{}
 	err := json.Unmarshal(bs, &concrete)
 	if err != nil {
@@ -216,137 +192,34 @@ func invoke(ctx context.Context, parentJSON []byte, parentName string, fnName st
 	switch parentName {
 	case "Dagmar":
 		switch fnName {
-		case "DeployEngine":
+		case "DagmarBootstrap":
 			var parent Dagmar
 			err = json.Unmarshal(parentJSON, &parent)
 			if err != nil {
 				panic(fmt.Errorf("%s: %w", "failed to unmarshal parent object", err))
 			}
-			var cluster string
-			if inputArgs["cluster"] != nil {
-				err = json.Unmarshal([]byte(inputArgs["cluster"]), &cluster)
+			var source *dagger.Directory
+			if inputArgs["source"] != nil {
+				err = json.Unmarshal([]byte(inputArgs["source"]), &source)
 				if err != nil {
-					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg cluster", err))
+					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg source", err))
 				}
 			}
-			return (*Dagmar).DeployEngine(&parent, ctx, cluster)
-		case "Probe":
+			return (*Dagmar).DagmarBootstrap(&parent, ctx, source)
+		case "DagmarGate":
 			var parent Dagmar
 			err = json.Unmarshal(parentJSON, &parent)
 			if err != nil {
 				panic(fmt.Errorf("%s: %w", "failed to unmarshal parent object", err))
 			}
-			var cluster string
-			if inputArgs["cluster"] != nil {
-				err = json.Unmarshal([]byte(inputArgs["cluster"]), &cluster)
+			var source *dagger.Directory
+			if inputArgs["source"] != nil {
+				err = json.Unmarshal([]byte(inputArgs["source"]), &source)
 				if err != nil {
-					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg cluster", err))
+					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg source", err))
 				}
 			}
-			return (*Dagmar).Probe(&parent, ctx, cluster)
-		case "ProbeCache":
-			var parent Dagmar
-			err = json.Unmarshal(parentJSON, &parent)
-			if err != nil {
-				panic(fmt.Errorf("%s: %w", "failed to unmarshal parent object", err))
-			}
-			var mode string
-			if inputArgs["mode"] != nil {
-				err = json.Unmarshal([]byte(inputArgs["mode"]), &mode)
-				if err != nil {
-					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg mode", err))
-				}
-			}
-			return (*Dagmar).ProbeCache(&parent, ctx, mode)
-		case "ProbeNet":
-			var parent Dagmar
-			err = json.Unmarshal(parentJSON, &parent)
-			if err != nil {
-				panic(fmt.Errorf("%s: %w", "failed to unmarshal parent object", err))
-			}
-			return (*Dagmar).ProbeNet(&parent, ctx)
-		case "Sandbox":
-			var parent Dagmar
-			err = json.Unmarshal(parentJSON, &parent)
-			if err != nil {
-				panic(fmt.Errorf("%s: %w", "failed to unmarshal parent object", err))
-			}
-			var image string
-			if inputArgs["image"] != nil {
-				err = json.Unmarshal([]byte(inputArgs["image"]), &image)
-				if err != nil {
-					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg image", err))
-				}
-			}
-			var workingDir string
-			if inputArgs["workingDir"] != nil {
-				err = json.Unmarshal([]byte(inputArgs["workingDir"]), &workingDir)
-				if err != nil {
-					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg workingDir", err))
-				}
-			}
-			return (*Dagmar).Sandbox(&parent, image, workingDir)
-		case "Up":
-			var parent Dagmar
-			err = json.Unmarshal(parentJSON, &parent)
-			if err != nil {
-				panic(fmt.Errorf("%s: %w", "failed to unmarshal parent object", err))
-			}
-			var cluster string
-			if inputArgs["cluster"] != nil {
-				err = json.Unmarshal([]byte(inputArgs["cluster"]), &cluster)
-				if err != nil {
-					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg cluster", err))
-				}
-			}
-			return (*Dagmar).Up(&parent, ctx, cluster)
-		case "":
-			var parent Dagmar
-			err = json.Unmarshal(parentJSON, &parent)
-			if err != nil {
-				panic(fmt.Errorf("%s: %w", "failed to unmarshal parent object", err))
-			}
-			var project *dagger.Directory
-			if inputArgs["project"] != nil {
-				err = json.Unmarshal([]byte(inputArgs["project"]), &project)
-				if err != nil {
-					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg project", err))
-				}
-			}
-			var seeds string
-			if inputArgs["seeds"] != nil {
-				err = json.Unmarshal([]byte(inputArgs["seeds"]), &seeds)
-				if err != nil {
-					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg seeds", err))
-				}
-			}
-			var mulch string
-			if inputArgs["mulch"] != nil {
-				err = json.Unmarshal([]byte(inputArgs["mulch"]), &mulch)
-				if err != nil {
-					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg mulch", err))
-				}
-			}
-			var canopy string
-			if inputArgs["canopy"] != nil {
-				err = json.Unmarshal([]byte(inputArgs["canopy"]), &canopy)
-				if err != nil {
-					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg canopy", err))
-				}
-			}
-			return New(project, seeds, mulch, canopy), nil
-		default:
-			return nil, fmt.Errorf("unknown function %s", fnName)
-		}
-	case "Sandbox":
-		switch fnName {
-		case "Container":
-			var parent Sandbox
-			err = json.Unmarshal(parentJSON, &parent)
-			if err != nil {
-				panic(fmt.Errorf("%s: %w", "failed to unmarshal parent object", err))
-			}
-			return (*Sandbox).Container(&parent), nil
+			return (*Dagmar).DagmarGate(&parent, ctx, source)
 		default:
 			return nil, fmt.Errorf("unknown function %s", fnName)
 		}
