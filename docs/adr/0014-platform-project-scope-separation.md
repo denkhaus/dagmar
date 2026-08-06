@@ -168,6 +168,13 @@ over its bootstrap and is premature for a single project.
   does not travel wholesale: manifest parsing → `.dagmar/`, `OsEcoConfig` → stays in `.dagger/`.
   (`bootstrap.go` imports only the generated SDK + stdlib and travels clean.) The implementer of the
   deferred split must split `config` alongside the move, or hit the `internal/` wall mid-move.
+  **Interim, not end-state (seed dagmar-a1e0):** the manifest's project-module home is a
+  Dagger-forced interim — the manifest is PLATFORM authority and a user Project must not own its
+  parsing. Relocating it to the platform as a cross-module Go dep (`replace dagger/dagmar =>
+  ../.dagger`) was tried and FAILED: Dagger loads each module in source isolation, so a
+  relative-replace sibling dep cannot resolve at module-load time. The clean resolution is a
+  PUBLISHED shared library (a versioned Go module both `.dagger` and `.dagmar` depend on by
+  `require`, not relative `replace`) — tracked in dagmar-a1e0.
 - The platform's conformance contract becomes mechanical (does `.dagmar` expose
   `dagmar-bootstrap`/`dagmar-gate`?) rather than implicit.
 
@@ -175,6 +182,10 @@ over its bootstrap and is premature for a single project.
 
 - **Published/subpath-ref dogfood** (`-m github.com/denkhaus/dagmar/.dagmar@<ref>`) — later, once
   dagmar is published; validates the exactly-external experience + the subpath-ref mechanism.
+- **Manifest → published shared library (dagmar-a1e0)** — extract the platform contract types +
+  parser into a versioned Go module both the platform and project modules depend on by `require`.
+  The manifest's current project-module home (`.dagmar/internal/config`) is an interim forced by
+  Dagger's source-isolated module loading (a relative sibling `replace` cannot resolve at load).
 - **Runtime conformance probe** — the platform verifying the project module exposes the
   gate-family functions before dispatch. Later hardening over the naming-convention contract.
 - **Central invocation wrapper** — only if callers diverge or a probe becomes economical.
