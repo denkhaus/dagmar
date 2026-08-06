@@ -70,6 +70,19 @@ until a reclaim policy exists. Reclaim ownership (controller / engine / ops) and
 size) are a later increment (review-15 HOUSE-4). `Run` deletion garbage-collects its pod via the
 owner reference.
 
+> **Implementation reality (2026-08-06) — D4 deferred.** The Project-level identity finalizer is
+> **blocked** on identity being safely per-Run-deletable, which it is not yet. Today the controller
+> provisions identity per-Run but **shared-named** within a namespace (SA `dagmar-agent`; Role +
+> RoleBinding `dagmar-agent-exec` in the engine namespace — the latter is cross-namespace, so NOT
+> owner-ref'd to the Run, a documented leak carried over from dagmar-67bc). A Run- or Project-level
+> finalizer that deleted these shared-named resources would **break sibling Runs** in the same
+> namespace. Per-Project namespaces are not provisioned either (Runs run in the Project's namespace,
+> `default`), and there is no `ProjectReconciler`. So neither a Run- nor Project-level finalizer can
+> cleanly tear down identity today. D4 is unblocked by the identity-refactor seed (make identity
+> per-Run-named, OR provision per-Project namespaces + a `ProjectReconciler`); until then the
+> engine-namespace Role/RoleBinding leak remains the documented interim gap. (Mirrors the ADR-0014
+> GAP-1 interim-note honesty pattern: the divergence is on record, not silent.)
+
 **Status conditions (D5):** standard `metav1.Condition` with a pinned minimal set, grown
 deliberately: `Run` {Accepted, Progressing, Succeeded, Failed}; `Project` {Provisioned, Ready}.
 Idiomatic, k9s-readable, carries reason/message/lastTransition.
