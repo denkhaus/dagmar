@@ -4,12 +4,30 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// RunPhase is the high-level phase of a Run's lifecycle (Status.Phase).
+// RunPhase is the high-level phase of a Run's lifecycle (Status.Phase), DERIVED from the
+// condition set (phaseFromConditions) — a read-optimized summary for k9s/back-compat. The
+// conditions (RunCondition*) are the source of truth (ADR-0013 D5).
 const (
 	RunPhasePending   = "Pending"
 	RunPhaseRunning   = "Running"
 	RunPhaseSucceeded = "Succeeded"
 	RunPhaseFailed    = "Failed"
+)
+
+// RunCondition* are the pinned Run status condition types (metav1.Condition.Type), the minimal set
+// grown deliberately (ADR-0013 D5): the controller writes exactly these four. Condition TYPES are
+// open-ended in the CRD schema, so adding/growing this set needs no manifest regen.
+const (
+	// RunConditionAccepted — the Run passed validation (Project + ModuleRef/Function present, git-creds
+	// Secret exists) and was admitted for dispatch. False on a terminal validation rejection.
+	RunConditionAccepted = "Accepted"
+	// RunConditionProgressing — the agent pod is actively executing (Running). False while dispatched-
+	// but-waiting (Pending) or terminal (Succeeded/Failed/rejected).
+	RunConditionProgressing = "Progressing"
+	// RunConditionSucceeded — the Run reached a successful terminal state (pod Succeeded).
+	RunConditionSucceeded = "Succeeded"
+	// RunConditionFailed — the Run reached a failed terminal state (pod Failed OR a validation rejection).
+	RunConditionFailed = "Failed"
 )
 
 // RunSpec defines one execution of an Agent in one Sandbox on one Workspace — the observable,

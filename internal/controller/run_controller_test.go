@@ -8,6 +8,7 @@ import (
 	"github.com/denkhaus/dagmar/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -167,6 +168,13 @@ func TestReconcile_EmptyModuleRefIsTerminalFailed(t *testing.T) {
 	if updated.Status.Phase != v1alpha1.RunPhaseFailed {
 		t.Errorf("status phase = %q, want Failed", updated.Status.Phase)
 	}
+	// D5 (ADR-0013): a validation rejection is Accepted=False + Failed=True (not a dispatched Run
+	// that failed — it was never admitted). No AgentPodName (no pod on this path).
+	assertCondition(t, updated, v1alpha1.RunConditionAccepted, metav1.ConditionFalse)
+	assertCondition(t, updated, v1alpha1.RunConditionFailed, metav1.ConditionTrue)
+	if updated.Status.AgentPodName != "" {
+		t.Errorf("rejected Run must not set AgentPodName, got %q", updated.Status.AgentPodName)
+	}
 }
 
 func TestReconcile_EmptyModuleFunctionIsTerminalFailed(t *testing.T) {
@@ -323,4 +331,99 @@ func TestReconcile_MissingGitCredentialsSecretIsTerminalFailed(t *testing.T) {
 	if updated.Status.Phase != v1alpha1.RunPhaseFailed {
 		t.Errorf("status phase = %q, want Failed (GitCredentialsSecretNotFound)", updated.Status.Phase)
 	}
+}
+
+// TestReconcile_WritesPinnedConditionSet exercises the ADR-0013 D5 condition taxonomy across the
+// happy-path pod lifecycle: a freshly-created pod (Pending) → Accepted=True/Progressing=False; the
+// pod Running → Progressing=True; the pod Succeeded → Succeeded=True/Progressing=False. Phase is
+// derived from the conditions at each step.
+func TestReconcile_WritesPinnedConditionSet(t *testing.T) {
+	run := &v1alpha1.Run{
+		ObjectMeta: metav1.ObjectMeta{Name: "conds", Namespace: "default"},
+		Spec:       v1alpha1.RunSpec{ProjectRef: "dagmar-own", ModuleFunction: "probe-net"},
+	}
+	r, cl := newTestReconciler(t, run)
+	ctx := context.Background()
+	key := types.NamespacedName{Name: "conds", Namespace: "default"}
+	req := ctrl.Request{NamespacedName: key}
+	podKey := types.NamespacedName{Name: "conds-agent", Namespace: "default"}
+
+	// (a) Freshly-created pod (phase "") → Accepted=True, Progressing=False, Phase=Pending. This is
+	// the "dispatched but not yet executing" state — distinct from Running (Progressing=True).
+	mustReconcile(t, ctx, r, req)
+	updated := fetchRun(t, cl, key)
+	assertCondition(t, updated, v1alpha1.RunConditionAccepted, metav1.ConditionTrue)
+	assertCondition(t, updated, v1alpha1.RunConditionProgressing, metav1.ConditionFalse)
+	if updated.Status.Phase != v1alpha1.RunPhasePending {
+		t.Errorf("(a) phase = %q, want Pending", updated.Status.Phase)
+	}
+	if updated.Status.AgentPodName != "conds-agent" {
+		t.Errorf("(a) AgentPodName = %q, want conds-agent", updated.Status.AgentPodName)
+	}
+
+	// (b) Pod Running → Progressing=True, Phase=Running.
+	setPodPhase(t, cl, podKey, corev1.PodRunning)
+	mustReconcile(t, ctx, r, req)
+	updated = fetchRun(t, cl, key)
+	assertCondition(t, updated, v1alpha1.RunConditionProgressing, metav1.ConditionTrue)
+	if updated.Status.Phase != v1alpha1.RunPhaseRunning {
+		t.Errorf("(b) phase = %q, want Running", updated.Status.Phase)
+	}
+
+	// (c) Pod Succeeded → Succeeded=True, Progressing=False, Phase=Succeeded.
+	setPodPhase(t, cl, podKey, corev1.PodSucceeded)
+	mustReconcile(t, ctx, r, req)
+	updated = fetchRun(t, cl, key)
+	assertCondition(t, updated, v1alpha1.RunConditionSucceeded, metav1.ConditionTrue)
+	assertCondition(t, updated, v1alpha1.RunConditionProgressing, metav1.ConditionFalse)
+	if updated.Status.Phase != v1alpha1.RunPhaseSucceeded {
+		t.Errorf("(c) phase = %q, want Succeeded", updated.Status.Phase)
+	}
+}
+
+// assertCondition fails the test if run's condition condType is absent or not the wanted status.
+func assertCondition(t *testing.T, run *v1alpha1.Run, condType string, want metav1.ConditionStatus) {
+	t.Helper()
+	c := meta.FindStatusCondition(run.Status.Conditions, condType)
+	if c == nil {
+		types := make([]string, len(run.Status.Conditions))
+		for i, x := range run.Status.Conditions {
+			types[i] = x.Type
+		}
+		t.Errorf("condition %q missing (have %v)", condType, types)
+		return
+	}
+	if c.Status != want {
+		t.Errorf("condition %q = %s, want %s", condType, c.Status, want)
+	}
+}
+
+// setPodPhase updates the agent pod's status phase via the fake client (simulating the pod-watch
+// transition the kubelet would drive).
+func setPodPhase(t *testing.T, cl client.Client, key types.NamespacedName, phase corev1.PodPhase) {
+	t.Helper()
+	pod := &corev1.Pod{}
+	if err := cl.Get(context.Background(), key, pod); err != nil {
+		t.Fatalf("get pod %s: %v", key.Name, err)
+	}
+	pod.Status.Phase = phase
+	if err := cl.Status().Update(context.Background(), pod); err != nil {
+		t.Fatalf("update pod status: %v", err)
+	}
+}
+
+func mustReconcile(t *testing.T, ctx context.Context, r *RunReconciler, req ctrl.Request) {
+	t.Helper()
+	if _, err := r.Reconcile(ctx, req); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+}
+
+func fetchRun(t *testing.T, cl client.Client, key types.NamespacedName) *v1alpha1.Run {
+	t.Helper()
+	run := &v1alpha1.Run{}
+	if err := cl.Get(context.Background(), key, run); err != nil {
+		t.Fatalf("get run %s: %v", key.Name, err)
+	}
+	return run
 }

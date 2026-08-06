@@ -47,8 +47,9 @@ const (
 	// the engine may still be rolling out at kind bringup).
 	engineRequeueAfter = 10 * time.Second
 
-	// conditionAvailable is the Run "Available" condition type.
-	conditionAvailable = "Available"
+	// statusPatchAttempts bounds conflict-retry on the status subresource patch (concurrent
+	// reconcile — the pod watch + an engine requeue can race for one Run; ADR-0013 D5).
+	statusPatchAttempts = 3
 )
 
 // RunReconciler reconciles a Run CR into an agent pod that calls the dagmar module, and writes
@@ -131,8 +132,14 @@ func (r *RunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	enginePod, err := r.enginePodName(ctx)
 	if err != nil {
 		logger.Info("engine pod not ready; requeueing", "err", err)
-		_ = r.setStatus(ctx, run, v1alpha1.RunPhasePending, "EngineNotReady",
-			err.Error(), metav1.ConditionUnknown)
+		// Transient: validation passed (Accepted=True) but the engine isn't Ready, so the Run is
+		// not yet progressing. No pod exists yet → AgentPodName is not set. Requeue, not terminal.
+		_ = r.patchStatus(ctx, run, func(s *v1alpha1.RunStatus) {
+			gen := run.Generation
+			meta.SetStatusCondition(&s.Conditions, runCondition(v1alpha1.RunConditionAccepted, metav1.ConditionTrue, "EngineNotReady", err.Error(), gen))
+			meta.SetStatusCondition(&s.Conditions, runCondition(v1alpha1.RunConditionProgressing, metav1.ConditionFalse, "EngineNotReady", err.Error(), gen))
+			s.Phase = v1alpha1.RunPhasePending
+		})
 		return ctrl.Result{RequeueAfter: engineRequeueAfter}, nil
 	}
 
@@ -147,14 +154,18 @@ func (r *RunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		return ctrl.Result{}, err
 	}
 
-	// 6. Mirror the pod phase into the Run status + record the pod name. A distinct reason on the
-	// terminal failure path (review-13 HOUSE-3) — "Reconciling" was misleading for a Failed pod.
-	reason, message := "Reconciling", "agent pod observed"
-	if pod.Status.Phase == corev1.PodFailed {
+	// 6. Mirror the observed pod phase into the pinned condition set + derived Phase (ADR-0013 D5).
+	// A distinct reason per path (review-13 HOUSE-3 — "Reconciling" was misleading on terminal).
+	reason, message := "Dispatched", "agent pod observed"
+	switch pod.Status.Phase {
+	case corev1.PodFailed:
 		reason, message = "AgentPodFailed", "agent pod exited non-zero"
+	case corev1.PodSucceeded:
+		reason, message = "AgentPodSucceeded", "agent pod exited zero"
+	case corev1.PodRunning:
+		reason, message = "Dispatched", "agent pod running"
 	}
-	return ctrl.Result{}, r.setStatus(ctx, run, podPhaseToRunPhase(pod.Status.Phase), reason, message,
-		runConditionStatus(pod.Status.Phase))
+	return ctrl.Result{}, r.reconcileStatus(ctx, run, pod.Status.Phase, reason, message)
 }
 
 // enginePodName lists a Ready singleton engine pod and returns its name.
@@ -325,47 +336,88 @@ func agentPodFor(run *v1alpha1.Run, project *v1alpha1.Project, enginePod, podNam
 	}
 }
 
-// setStatus writes Phase + AgentPodName + an Available condition to the Run's status subresource.
-func (r *RunReconciler) setStatus(ctx context.Context, run *v1alpha1.Run, phase, reason, message string, available metav1.ConditionStatus) error {
-	run.Status.Phase = phase
-	run.Status.AgentPodName = agentPodName(run.Name)
-	meta.SetStatusCondition(&run.Status.Conditions, metav1.Condition{
-		Type: conditionAvailable, Status: available, Reason: reason, Message: message,
-		ObservedGeneration: run.Generation,
-	})
-	return r.Status().Update(ctx, run)
+// patchStatus applies mutate to a fresh copy of the Run's status and patches the status subresource
+// with a MergeFrom (status-only) patch, retrying on Conflict (concurrent reconcile — the pod watch
+// and an engine requeue can race for one Run). Conditions are the source of truth; Phase is derived
+// (ADR-0013 D5). The mutator receives the freshly-fetched status; run.Generation is captured for
+// ObservedGeneration.
+func (r *RunReconciler) patchStatus(ctx context.Context, run *v1alpha1.Run, mutate func(*v1alpha1.RunStatus)) error {
+	for attempt := 0; attempt < statusPatchAttempts; attempt++ {
+		fresh := &v1alpha1.Run{}
+		if err := r.Get(ctx, client.ObjectKeyFromObject(run), fresh); err != nil {
+			return fmt.Errorf("get run for status patch: %w", err)
+		}
+		base := fresh.DeepCopy()
+		mutate(&fresh.Status)
+		if err := r.Status().Patch(ctx, fresh, client.MergeFrom(base)); err != nil {
+			if errors.IsConflict(err) && attempt < statusPatchAttempts-1 {
+				continue // re-Get + repatch
+			}
+			return fmt.Errorf("patch run status: %w", err)
+		}
+		return nil
+	}
+	return fmt.Errorf("patch run status: exhausted %d conflict retries", statusPatchAttempts)
 }
 
-// failRun is setStatus with Phase=Failed + Available=False (terminal config errors).
+// reconcileStatus mirrors the observed agent-pod phase into the pinned condition set (ADR-0013 D5)
+// + the derived Phase + AgentPodName. Called once the pod is observed (validation has passed, so
+// Accepted=True). podPhase "" (pod just created, not yet Pending/Running) is treated as dispatched-
+// but-waiting → Progressing=False, Phase=Pending (distinct from Running, which sets Progressing=True).
+func (r *RunReconciler) reconcileStatus(ctx context.Context, run *v1alpha1.Run, podPhase corev1.PodPhase, reason, message string) error {
+	return r.patchStatus(ctx, run, func(s *v1alpha1.RunStatus) {
+		gen := run.Generation
+		s.AgentPodName = agentPodName(run.Name)
+		meta.SetStatusCondition(&s.Conditions, runCondition(v1alpha1.RunConditionAccepted, metav1.ConditionTrue, reason, message, gen))
+		progressing := metav1.ConditionFalse // dispatched-but-waiting (Pending/"") or terminal
+		if podPhase == corev1.PodRunning {
+			progressing = metav1.ConditionTrue
+		}
+		if podPhase == corev1.PodSucceeded {
+			meta.SetStatusCondition(&s.Conditions, runCondition(v1alpha1.RunConditionSucceeded, metav1.ConditionTrue, reason, message, gen))
+		}
+		if podPhase == corev1.PodFailed {
+			meta.SetStatusCondition(&s.Conditions, runCondition(v1alpha1.RunConditionFailed, metav1.ConditionTrue, reason, message, gen))
+		}
+		meta.SetStatusCondition(&s.Conditions, runCondition(v1alpha1.RunConditionProgressing, progressing, reason, message, gen))
+		s.Phase = phaseFromConditions(s.Conditions)
+	})
+}
+
+// failRun is the terminal-rejection status transition (ADR-0013 D5): the Run failed validation
+// (missing Project/ModuleRef/ModuleFunction/git-creds Secret), so Accepted=False + Failed=True +
+// Progressing=False. No pod is created on this path → AgentPodName is not set.
 func (r *RunReconciler) failRun(ctx context.Context, run *v1alpha1.Run, reason, message string) error {
-	return r.setStatus(ctx, run, v1alpha1.RunPhaseFailed, reason, message, metav1.ConditionFalse)
+	return r.patchStatus(ctx, run, func(s *v1alpha1.RunStatus) {
+		gen := run.Generation
+		meta.SetStatusCondition(&s.Conditions, runCondition(v1alpha1.RunConditionAccepted, metav1.ConditionFalse, reason, message, gen))
+		meta.SetStatusCondition(&s.Conditions, runCondition(v1alpha1.RunConditionProgressing, metav1.ConditionFalse, reason, message, gen))
+		meta.SetStatusCondition(&s.Conditions, runCondition(v1alpha1.RunConditionFailed, metav1.ConditionTrue, reason, message, gen))
+		s.Phase = phaseFromConditions(s.Conditions)
+	})
+}
+
+// runCondition builds a metav1.Condition for a Run status type.
+func runCondition(t string, st metav1.ConditionStatus, reason, message string, gen int64) metav1.Condition {
+	return metav1.Condition{Type: t, Status: st, Reason: reason, Message: message, ObservedGeneration: gen}
+}
+
+// phaseFromConditions derives the high-level Phase from the condition set (ADR-0013 D5): the
+// conditions are authoritative; Phase is a read-optimized summary for k9s/back-compat.
+func phaseFromConditions(conds []metav1.Condition) string {
+	switch {
+	case meta.IsStatusConditionTrue(conds, v1alpha1.RunConditionSucceeded):
+		return v1alpha1.RunPhaseSucceeded
+	case meta.IsStatusConditionTrue(conds, v1alpha1.RunConditionFailed):
+		return v1alpha1.RunPhaseFailed
+	case meta.IsStatusConditionTrue(conds, v1alpha1.RunConditionProgressing):
+		return v1alpha1.RunPhaseRunning
+	default:
+		return v1alpha1.RunPhasePending
+	}
 }
 
 func agentPodName(runName string) string { return runName + "-agent" }
-func podPhaseToRunPhase(p corev1.PodPhase) string {
-	switch p {
-	case corev1.PodPending:
-		return v1alpha1.RunPhasePending
-	case corev1.PodRunning:
-		return v1alpha1.RunPhaseRunning
-	case corev1.PodSucceeded:
-		return v1alpha1.RunPhaseSucceeded
-	case corev1.PodFailed:
-		return v1alpha1.RunPhaseFailed
-	default:
-		return v1alpha1.RunPhasePending
-	}
-}
-func runConditionStatus(p corev1.PodPhase) metav1.ConditionStatus {
-	switch p {
-	case corev1.PodSucceeded:
-		return metav1.ConditionTrue
-	case corev1.PodFailed:
-		return metav1.ConditionFalse
-	default:
-		return metav1.ConditionUnknown
-	}
-}
 
 // shellJoin joins args into a shell argument string (Phase 0 spike; no escaping — ModuleArgs are
 // shellJoin joins ModuleArgs into a shell argument string. See the SHELL-INJECTION NOTE on
@@ -375,7 +427,12 @@ func shellJoin(args []string) string {
 	return strings.Join(args, " ")
 }
 
-// SetupWithManager registers the reconciler for Run CRs, also watching owned Pods.
+// SetupWithManager registers the reconciler for Run CRs and watches owned Pods. D3 (ADR-0013 §2)
+// is realized here: For(Run)+Owns(Pod) + the controller-owner ref set in ensureAgentPod means a pod
+// phase transition (Running/Succeeded/Failed) requeues the owning Run automatically — no polling.
+// (Owns(&ServiceAccount{}) is intentionally NOT added: the agent SA is shared-named per namespace,
+// not per-Run, so an owner-ref watch is semantically wrong until identity becomes per-Run-named —
+// the D4-blocker, tracked in the identity-refactor seed.)
 func (r *RunReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&v1alpha1.Run{}).
