@@ -168,13 +168,18 @@ over its bootstrap and is premature for a single project.
   does not travel wholesale: manifest parsing → `.dagmar/`, `OsEcoConfig` → stays in `.dagger/`.
   (`bootstrap.go` imports only the generated SDK + stdlib and travels clean.) The implementer of the
   deferred split must split `config` alongside the move, or hit the `internal/` wall mid-move.
-  **Interim, not end-state (seed dagmar-a1e0):** the manifest's project-module home is a
-  Dagger-forced interim — the manifest is PLATFORM authority and a user Project must not own its
-  parsing. Relocating it to the platform as a cross-module Go dep (`replace dagger/dagmar =>
-  ../.dagger`) was tried and FAILED: Dagger loads each module in source isolation, so a
-  relative-replace sibling dep cannot resolve at module-load time. The clean resolution is a
-  PUBLISHED shared library (a versioned Go module both `.dagger` and `.dagmar` depend on by
-  `require`, not relative `replace`) — tracked in dagmar-a1e0.
+  **RESOLVED (dagmar-a1e0, 2026-08-07):** the manifest's project-module home was a Dagger-forced
+  interim — the manifest is PLATFORM authority and a user Project must not own its parsing. It is
+  now a PUBLISHED shared library (`manifest/` → `github.com/denkhaus/dagmar/manifest`) that both
+  `.dagger` (pins `ManifestContractVersion = manifest.Version`) and `.dagmar` (the gate parser)
+  depend on by versioned `require`. Relocating it as a relative-replace cross-module dep FAILED
+  (Dagger loads each module in source isolation; a relative sibling cannot resolve at load). The
+  published `require` DOES resolve at load — proven end-to-end in the gate (dagmar-gate loads both
+  modules) — because the dagmar repo is PUBLIC (Go fetches the contract over HTTPS, no auth) and
+  `GOPRIVATE=github.com/denkhaus/dagmar` skips the proxy/sumdb for the newly-published module. See
+  `manifest/doc.go` for the full resolution finding. The project-local `.dagmar/internal/config`
+  copy is deleted; the manifest is now genuinely platform-authority by construction (the shared
+  library IS the contract).
 - The platform's conformance contract becomes mechanical (does `.dagmar` expose
   `dagmar-bootstrap`/`dagmar-gate`?) rather than implicit.
 
@@ -182,10 +187,11 @@ over its bootstrap and is premature for a single project.
 
 - **Published/subpath-ref dogfood** (`-m github.com/denkhaus/dagmar/.dagmar@<ref>`) — later, once
   dagmar is published; validates the exactly-external experience + the subpath-ref mechanism.
-- **Manifest → published shared library (dagmar-a1e0)** — extract the platform contract types +
-  parser into a versioned Go module both the platform and project modules depend on by `require`.
-  The manifest's current project-module home (`.dagmar/internal/config`) is an interim forced by
-  Dagger's source-isolated module loading (a relative sibling `replace` cannot resolve at load).
+- **Manifest → published shared library (dagmar-a1e0)** — DONE (2026-08-07). Extracted into
+  `manifest/` (`github.com/denkhaus/dagmar/manifest`); both `.dagger` and `.dagmar` depend on it by
+  versioned `require`; the project-local `.dagmar/internal/config` copy is removed. The
+  load-resolution question (relative `replace` failed; published `require` works once the repo is
+  public) is resolved — see the Consequences GAP-1 update + `manifest/doc.go`.
 - **Runtime conformance probe** — the platform verifying the project module exposes the
   gate-family functions before dispatch. Later hardening over the naming-convention contract.
 - **Central invocation wrapper** — only if callers diverge or a probe becomes economical.
