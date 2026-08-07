@@ -2,3 +2,10 @@
 
 # controller-gen / tool binaries installed by the Justfile (go-install-tool idiom)
 /bin/
+
+# go.work: local multi-module dev workspace (manifest/.dagger/.dagmar/root resolve against
+# each other without publishing). GITIGNORED on purpose — a committed go.work would be visible
+# in the gate container (repo is mounted) and mask whether the published `require` actually
+# resolves. CI's fresh checkout has no go.work, so it exercises the real published-dep path.
+go.work
+go.work.sum
