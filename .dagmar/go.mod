@@ -11,7 +11,7 @@ require (
 	go.opentelemetry.io/otel/trace v1.43.0
 )
 
-require github.com/denkhaus/dagmar/manifest v0.0.0-20260807182901-689517a953c6
+require github.com/denkhaus/dagmar/manifest v0.1.0
 
 require (
 	github.com/99designs/gqlgen v0.17.89 // indirect
