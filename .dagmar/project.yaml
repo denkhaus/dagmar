@@ -9,7 +9,7 @@
 # with the mise.toml toolchain rolled out by dagmar-bootstrap (go + betterleaks via mise — mise.toml
 # is the single tool source for local dev, CI-direct, and the gate). The gate-family itself lives
 # in THIS module (.dagmar/, ADR-0014); the platform invokes it by ref (`-m .dagmar`).
-# All three Go modules build in MODULE MODE in the gate container (only the repo is mounted — no
+# All four Go modules build in MODULE MODE in the gate container (only the repo is mounted — no
 # parent go.work — so no GOWORK=off is needed).
 
 checkables:
@@ -32,6 +32,14 @@ checkables:
   # .dagmar/.gitattributes).
   - name: dagmar-project
     workdir: .dagmar
+    command: go build ./... && go vet ./... && go test ./...
+
+  # The manifest contract module (github.com/denkhaus/dagmar/manifest): the published platform
+  # schema + parser (dagmar-a1e0). Standalone go.mod graph (gopkg.in/yaml.v3). Runs the parser
+  # tests incl. the validateWorkdir path-escape/absolute/empty invariant (review-14 HOUSE-2) that
+  # no consumer's build reaches — Go's ./... does not cross module boundaries.
+  - name: manifest
+    workdir: manifest
     command: go build ./... && go vet ./... && go test ./...
 
   # Secret scan via betterleaks (gitleaks successor). betterleaks is provided by mise (rolled out

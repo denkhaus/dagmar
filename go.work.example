@@ -1,0 +1,15 @@
+# go.work.example — copy to `go.work` for local multi-module dev (the four modules resolve against
+# each other without re-publishing). `go.work` itself is gitignored on purpose: a committed go.work
+# would be visible inside the gate container (the repo is mounted at /src) and the checkables would
+# resolve `manifest` via the workspace `use` directive instead of the published `require` — masking
+# exactly the property the gate proves. CI's fresh checkout has no go.work, so CI exercises the real
+# published-dep path. NOTE: a parent go.work exists at ../go.work; this repo-root go.work shadows it
+# (Go selects the nearest go.work walking up from the module dir) — the nesting is intentional.
+go 1.26.5
+
+use (
+	.
+	.dagger
+	.dagmar
+	manifest
+)

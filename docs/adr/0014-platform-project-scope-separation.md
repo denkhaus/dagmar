@@ -64,7 +64,7 @@ is real, not preempted here.)
 | `Up`, `DeployEngine`, `Probe`, `ProbeNet`, `ProbeCache` | engine/cluster infra | PLATFORM |
 | `Sandbox` | agent execution context (`1 Run : 1 Sandbox`) | PLATFORM |
 | `DagmarBootstrap`, `DagmarGate` + `workflows.{Bootstrap,Gate}` | dagmar-as-a-project's gate-family conformance contract | PROJECT |
-| `.dagmar/project.yaml` (manifest) | project conformance contract (data) | PROJECT |
+| `.dagmar/project.yaml` (manifest INSTANCE) | project conformance contract (data) | PROJECT — the schema/parser is PLATFORM authority, published as `manifest/` (see Consequences GAP-1) |
 
 `Sandbox` is **platform**: it is the agent execution context the platform provisions per Run,
 coupled to Run/Engine — distinct from the project-side container-exec the gate uses for
@@ -175,8 +175,9 @@ over its bootstrap and is premature for a single project.
   depend on by versioned `require`. Relocating it as a relative-replace cross-module dep FAILED
   (Dagger loads each module in source isolation; a relative sibling cannot resolve at load). The
   published `require` DOES resolve at load — proven end-to-end in the gate (dagmar-gate loads both
-  modules) — because the dagmar repo is PUBLIC (Go fetches the contract over HTTPS, no auth) and
-  `GOPRIVATE=github.com/denkhaus/dagmar` skips the proxy/sumdb for the newly-published module. See
+  modules) — because the dagmar repo is PUBLIC: proxy.golang.org fetches the contract over HTTPS
+  (no auth) and the committed go.sum carries the hash, so no GOPRIVATE is needed (it is optional,
+  only to bypass the sum.golang.org crawl of a freshly-published module). See
   `manifest/doc.go` for the full resolution finding. The project-local `.dagmar/internal/config`
   copy is deleted; the manifest is now genuinely platform-authority by construction (the shared
   library IS the contract).

@@ -1,14 +1,6 @@
-// manifest.go — ProjectManifest types + parsing (ADR-0003). PURE (no Dagger import) →
-// unit-testable without an engine; reading the manifest bytes out of a *dagger.Directory is a
-// Dagger I/O concern in the consuming gate (workflows.Gate).
-//
-// This is the PLATFORM's published manifest contract — platform authority by construction (this
-// shared library IS the contract), not by convention. Both the platform module (.dagger) and every
-// conforming project module (.dagmar) depend on it by a versioned `require`. A versioned remote
-// dep resolves under Dagger's source-isolated module loading where a relative sibling `replace`
-// cannot (the sibling dir is absent from the load context) — the exact resolution mechanism proven
-// for dagmar-a1e0 is recorded in doc.go. Projects author INSTANCES (.dagmar/project.yaml); the
-// schema + validation here are platform-owned, analogous to the Project CRD.
+// manifest.go — ProjectManifest types + parsing (ADR-0003). PURE (no Dagger import); see doc.go
+// for the package's authority + load-resolution story.
+
 package manifest
 
 import (

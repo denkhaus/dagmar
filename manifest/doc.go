@@ -14,12 +14,17 @@
 //
 // Resolution (CONFIRMED by the dagmar-a1e0 prototype gate, 2026-08-07): a versioned `require`
 // (pseudo-version from this module's published commit) DOES resolve at Dagger's source-isolated
-// module load — but only because the dagmar repo is PUBLIC, so Go fetches
-// github.com/denkhaus/dagmar/manifest over HTTPS without auth. A PRIVATE repo FAILS: the load
-// container cannot authenticate to github.com over HTTPS (no git insteadOf / token in the
-// container, and the SDK's load-time `go mod tidy` ignores a committed vendor/). GOPRIVATE=
-// github.com/denkhaus/dagmar skips the public proxy + sumdb (needed for a newly-published module
-// until sum.golang.org records it). For clean versioning, tag the subdir module manifest/vX.Y.Z
-// (the prototype uses a pseudo-version from the extract commit; tag at merge to main). A local
-// repo-root go.work (gitignored) gives instant cross-module dev without re-publishing.
+// module load — but only because the dagmar repo is PUBLIC. proxy.golang.org fetches
+// github.com/denkhaus/dagmar/manifest over HTTPS (no auth) and the committed go.sum carries the
+// hash, so NO GOPRIVATE is required on the proven path. A PRIVATE repo FAILS: the load container
+// cannot authenticate to github.com over HTTPS (no git insteadOf / token in the container), and the
+// SDK's load-time `go mod tidy` ignores a committed vendor/. GOPRIVATE=github.com/denkhaus/dagmar is
+// only optional belt-and-suspenders to bypass the sum.golang.org crawl of a freshly-published module
+// (it is not wired into CI/load and not needed here). For clean versioning, tag the subdir module
+// manifest/vX.Y.Z (the prototype uses a pseudo-version from the extract commit; tag at merge to
+// main). A local repo-root go.work (gitignored) gives instant cross-module dev without re-publishing.
+//
+// Version axes (distinct, do not conflate): `Version` below is the CONTRACT schema revision this
+// library implements (v0.1.0); the MODULE release tag (manifest/vX.Y.Z) is the publish artifact.
+// They are independent — a schema revision may ship across several module tags.
 package manifest
