@@ -9,3 +9,8 @@
 # resolves. CI's fresh checkout has no go.work, so it exercises the real published-dep path.
 go.work
 go.work.sum
+
+# direnv / local env — may carry secrets (e.g. GITHUB_TOKEN for mise/ubi in the gate).
+# NEVER commit; each developer's local file.
+.envrc
+.env
