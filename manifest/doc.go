@@ -12,11 +12,14 @@
 // *dagger.Directory into manifest bytes is a Dagger I/O concern that lives in the consuming gate
 // (workflows.Gate), not here.
 //
-// Resolution: both consumer modules (the platform .dagger and the project .dagmar) depend on this
-// by a versioned `require` (a published remote dep), which resolves under Dagger's
-// source-isolated module loading.
-//
-// TODO(dagmar-a1e0): record the concrete resolution mechanism here once the prototype gate
-// confirms it — pseudo-version from commit vs git tag (manifest/vX.Y.Z), and whether a committed
-// vendor/ offers a hermetic network-free fallback for the local dev loop.
+// Resolution (CONFIRMED by the dagmar-a1e0 prototype gate, 2026-08-07): a versioned `require`
+// (pseudo-version from this module's published commit) DOES resolve at Dagger's source-isolated
+// module load — but only because the dagmar repo is PUBLIC, so Go fetches
+// github.com/denkhaus/dagmar/manifest over HTTPS without auth. A PRIVATE repo FAILS: the load
+// container cannot authenticate to github.com over HTTPS (no git insteadOf / token in the
+// container, and the SDK's load-time `go mod tidy` ignores a committed vendor/). GOPRIVATE=
+// github.com/denkhaus/dagmar skips the public proxy + sumdb (needed for a newly-published module
+// until sum.golang.org records it). For clean versioning, tag the subdir module manifest/vX.Y.Z
+// (the prototype uses a pseudo-version from the extract commit; tag at merge to main). A local
+// repo-root go.work (gitignored) gives instant cross-module dev without re-publishing.
 package manifest

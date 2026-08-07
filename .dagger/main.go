@@ -18,7 +18,15 @@ import (
 	"dagger/dagmar/internal/app"
 	"dagger/dagmar/internal/dagger"
 	"dagger/dagmar/internal/domain"
+	"github.com/denkhaus/dagmar/manifest"
 )
+
+// ManifestContractVersion is the manifest-contract version this platform build conforms to
+// (the published contract github.com/denkhaus/dagmar/manifest, dagmar-a1e0). CRD-analogous:
+// the platform declares which manifest schema revision it validates and speaks. Keeping the
+// platform dependent on the published contract (not a project-local copy) is what makes the
+// manifest genuinely platform-authority (ADR-0014 GAP-1, resolved by dagmar-a1e0).
+const ManifestContractVersion = manifest.Version
 
 // Dagmar is dagmar's main Dagger object (auto-named from the module). It is the primary
 // entry point into dagmar's Dagger functionality AND the per-Project binding seam: the New

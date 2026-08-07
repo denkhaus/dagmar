@@ -6,6 +6,7 @@ require (
 	github.com/Khan/genqlient v0.8.1
 	github.com/dagger/otel-go v1.43.0
 	github.com/dagger/querybuilder v0.0.0-20260402040506-574a5e81cb59
+	github.com/denkhaus/dagmar/manifest v0.0.0-20260807182901-689517a953c6
 	github.com/vektah/gqlparser/v2 v2.5.32
 	go.opentelemetry.io/otel v1.43.0
 	go.opentelemetry.io/otel/trace v1.43.0
@@ -15,6 +16,7 @@ require (
 require (
 	golang.org/x/mod v0.33.0 // indirect
 	golang.org/x/tools v0.42.0 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
 require (
