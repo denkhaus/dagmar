@@ -1,11 +1,14 @@
 # ADR-0015: Per-Project-scoped agent identity & D4 finalizer unblock
 
 Date: 2026-08-07
-Seed: dagmar-54c9 (part of dagmar-80dd) · Status: **PROPOSED**
-Decided via grilling 2026-08-07. Resolves the identity-refactor seed: makes agent identity safely
-per-Project-deletable so ADR-0013 §2 **D4** (a Project finalizer that tears down provisioned
-identity) is unblocked, and closes two live hazards — the SA-owner-ref GC sibling-break
-(review-19 GAP-1) and the engine-namespace Role/RoleBinding leak (carried from dagmar-67bc).
+Seed: dagmar-54c9 (part of dagmar-80dd) · Status: **ACCEPTED**
+Decided via grilling 2026-08-07; revised after dagmar-review 20
+(`docs/review/20-2026-08-07-1bb4cad-54c9.md`, NEEDS-WORK-light → revised: GAP-1 RBAC ledger,
+SPEC-1 third-mechanism honesty, SPEC-2 lifecycle-vs-credential disclaimer, HOUSE-1/2/3/4; then
+accepted). Resolves the identity-refactor seed: makes agent identity safely per-Project-deletable
+so ADR-0013 §2 **D4** (a Project finalizer that tears down provisioned identity) is unblocked, and
+closes two live hazards — the SA-owner-ref GC sibling-break (review-19 GAP-1) and the
+engine-namespace Role/RoleBinding leak (carried from dagmar-67bc).
 
 ## Context
 
@@ -40,6 +43,12 @@ deliberately leaves that divergence open as an interim (Decision §5); the cache
 
 ### 1. Identity granularity — per-Project, single fixed namespace (Q1 = C)
 
+"Agent identity" here means the pod's **exec-into-engine identity**: the ServiceAccount the agent
+pod runs as + the engine-namespace Role/RoleBinding granting it `pods/exec`+`pods:get` on the
+singleton engine — *distinct from* ADR-0007's per-Run projected credentials (the SA carries no
+`secrets` verbs; it is not a credential holder). This ADR concerns the identity's **lifecycle
+granularity**, not credential isolation (§5).
+
 Agent identity becomes **per-Project-scoped**: a ServiceAccount `dagmar-agent-<project>` in the
 Project's namespace (today `default`), shared by all Runs of that Project. The engine-namespace
 Role + RoleBinding become `dagmar-agent-exec-<project>` (uniquely named per Project). Granularity
@@ -49,9 +58,10 @@ matches ADR-0013 D4's **Project-level** finalizer as written — no D4 revision 
 All Runs of a Project share the one per-Project SA. Workspaces stay per-Run-isolated (CONTEXT.md);
 the SA is the Project's identity, not a per-Run one. This is the intended isolation boundary until
 per-Project namespaces land (§5), at which point the SA simply moves into the Project's own
-namespace — same name, same RBAC shape, no rework.
+namespace — same name, same RBAC *shape* (the RoleBinding `subject.Namespace` and the SA's
+namespace do change — minor string rework, no identity-model rework).
 
-### 2. Ownership — a new ProjectReconciler owns the whole identity lifecycle (Q2 = C1-voll)
+### 2. Ownership — a new ProjectReconciler owns the whole identity lifecycle (Q2 = C1-full)
 
 A new **`ProjectReconciler`** (does not exist today) owns identity creation AND deletion
 end-to-end. `RunReconciler.ensureAgentIdentity` is **removed**; the RunReconciler becomes a
@@ -73,6 +83,11 @@ consumer only.
 Run lifecycle + its pod. This is the cleaner separation over (C2-split), where creation stayed
 lazy in the RunReconciler and only the finalizer lived on the Project — split ownership of one
 per-Project resource.
+
+**Project status (ADR-0013 D5):** the ProjectReconciler writes D5's pinned Project conditions —
+`Provisioned=True` once the SA + engine-ns Role/RoleBinding are reconciled, `Ready=True` once the
+binding is in place — so `projects/status` is **required** (not optional). (Today `ProjectStatus`
+exists but is written by nothing; this is its first writer.)
 
 ### 3. SA owner-ref → Project (not Run) — closes review-19 GAP-1
 
@@ -106,7 +121,19 @@ Bundling namespace provisioning (option B) would couple a safety fix to a larger
 placement changes, controller namespace assumptions, samples/RBAC rewrite, the 63-char
 namespace-name limit + slug strategy) without unblocking D4 any further.
 
+**Scope disclaimer (lifecycle-only, not credential isolation):** per-Project *naming* improves
+cross-Project identity separation within the shared namespace (Project A's pods cannot bind
+Project B's exec RoleBinding), but it delivers **no** cross-Project *credential* isolation —
+every Project still runs in `default`, so the namespace-scoped defense-in-depth layer
+(ADR-0007 §1, ADR-0008 §4) remains entirely absent, exactly as today. This ADR provides safe
+identity **lifecycle**; the credential boundary stays wholly on the deferred namespace layer.
+(This realizes one slice of ADR-0007's deferred "exact RBAC RoleBindings /
+service-account-per-Project model" — orthogonal to ADR-0007 §5's per-Run projected-secret
+isolation, which is untouched.)
+
 ## Alternatives considered
+
+*Granularity (Q1):*
 
 - **(A) Per-Run-named identity** (`dagmar-agent-<run>`): rejected — identity finer than the
   Project trust boundary (ADR-0008 §4), and it contradicts ADR-0013 D4's **Project-level**
@@ -117,9 +144,15 @@ namespace-name limit + slug strategy) without unblocking D4 any further.
   Run-placement changes, namespace-assumption rework, samples/RBAC rewrite, and the 63-char
   namespace-name limit (Project-name → namespace-name needs a slug/truncation strategy). The
   hazards this seed must fix are identity-scoped, not namespace-scoped.
+
+*Ownership (Q2):*
+
 - **(C2-split) RunReconciler stays lazy, ProjectReconciler finalizer-only:** rejected — split
   ownership of one per-Project resource (creation in one controller, deletion in another);
-  less-coherent SoC than (C1-voll) for ~equal code.
+  less-coherent SoC than (C1-full) for ~equal code.
+
+*Baseline:*
+
 - **Status quo (shared-named, no finalizer):** rejected — leaves both live hazards open
   (review-19 GAP-1 sibling-break; dagmar-67bc leak) and leaves D4 blocked indefinitely.
 
@@ -127,23 +160,35 @@ namespace-name limit + slug strategy) without unblocking D4 any further.
 
 - A new `ProjectReconciler` is added (`For(&Project{})`); `RunReconciler.ensureAgentIdentity` is
   deleted (~40 lines), replaced by a `Get` of `dagmar-agent-<project>` + requeue-on-NotFound.
-- **RBAC additions** (kubebuilder markers on the ProjectReconciler): `projects/finalizers:update`
-  (the finalizer) and `projects/status` (Project status writes, if any). The existing
-  `projects:get;list;watch` stays. The RunReconciler's `serviceaccounts`/`roles`/`rolebindings`
-  create verbs are **dropped** (it no longer creates identity).
-- **D4 (ADR-0013 §2) unblocked:** the Project-level finalizer now safely tears down identity
-  (per-Project-named → no sibling break). Once implemented, ADR-0013 §2's "Implementation reality
-  — D4 deferred" note is lifted (D4 realized, not deferred).
+- **RBAC ledger (the ProjectReconciler gains what the RunReconciler relinquishes):** the
+  ProjectReconciler carries `projects/finalizers:update` (the finalizer), `projects/status`
+  (required — it writes the D5 Project conditions, §2), and the **migrated**
+  `serviceaccounts`/`roles`/`rolebindings` `get;list;watch;create;update;patch` verbs the
+  RunReconciler drops. The existing `projects:get;list;watch` stays. Note the Role/RoleBinding are
+  created in the **engine** namespace — dagmar's first cross-namespace create by a reconciler
+  (the Project's namespace is `default`, the engine's is `dagmar`).
+- **D4 (ADR-0013 §2) unblocked — by a third mechanism:** the Project-level finalizer now safely
+  tears down identity (per-Project-named → no sibling break). The realized branch is neither of
+  the D4 deferral note's binary (per-Run-named OR per-Project-namespace) — it is per-Project-named
+  identity in a shared namespace + a ProjectReconciler, a hybrid that satisfies the note's
+  substantive requirement (drop/re-scope the SA owner-ref). Once implemented, ADR-0013 §2's
+  "Implementation reality — D4 deferred" note is lifted by recording this actual mechanism (not
+  "the binary was resolved").
 - **Both live hazards closed:** the SA-owner-ref GC sibling-break (review-19 GAP-1) and the
   engine-ns Role/RoleBinding leak (dagmar-67bc, TODO removed).
-- **`SetupWithManager` for Run does NOT add `Owns(&ServiceAccount{})`:** the SA is now owned by
-  the Project, not the Run — a Run owner-ref watch on it is semantically wrong. (The D5
-  implementation note already called this out.)
-- **Migration:** the dogfood cluster carries stale shared-named identity (`dagmar-agent` SA,
-  `dagmar-agent-exec` Role/RoleBinding in `default`/`dagmar`). These are **orphaned** by the
-  rename (harmless duplicates; no Project owns them, no finalizer touches them) — left as-is for
-  dev, or swept by a one-off `kubectl delete` when convenient. Documented as a migration TODO for
-  any cluster that ran the pre-0015 controller.
+- **`SetupWithManager`:** the Run reconciler does NOT add `Owns(&ServiceAccount{})` (the SA is
+  Project-owned now — a Run owner-ref watch is semantically wrong; the D5 implementation note
+  already called this out, and its stated condition should be updated from "until per-Run-named"
+  to the per-Project reason). The **Project** reconciler registers `For(&Project{}) +
+  Owns(&ServiceAccount{})` — the SA is Project-owned, so SA changes requeue the Project.
+- **Migration (two distinct cases):** the dogfood cluster carries stale shared-named identity.
+  - The old `dagmar-agent` SA is controller-owner-ref'd to its *creating* Run, so it **self-cleans**
+    when that Run deletes — not an orphan, no manual sweep needed.
+  - The old engine-ns `dagmar-agent-exec` Role + RoleBinding are cross-namespace, not owner-ref'd,
+    and carry no finalizer → they **leak indefinitely** (literally the dagmar-67bc bug, in the old
+    name) until a manual `kubectl delete -n dagmar role,rolebinding dagmar-agent-exec`. Call this
+    out, do not euphemize it as "harmless duplicate."
+  Documented as a migration TODO for any cluster that ran the pre-0015 controller.
 
 ## Deferred
 
