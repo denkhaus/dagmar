@@ -7,8 +7,8 @@ import (
 	"path"
 	"strings"
 
-	"dagger/dagmar-project/internal/config"
 	"dagger/dagmar-project/internal/dagger"
+	"github.com/denkhaus/dagmar/manifest"
 )
 
 // Gate is dagmar-gate: the always-Dagger verify wrapper that runs the manifest-declared
@@ -21,20 +21,21 @@ import (
 // constraint, not the gate's.
 //
 // dagmar-gate is reused in CI (GitHub Actions: `dagger call -m .dagmar dagmar-gate --source .`)
-// AND in-loop (coder self-verification, Phase 2). The manifest parser is project-local
-// (internal/config, ADR-0014) — see config/manifest.go for why it is not a platform cross-dep.
+// AND in-loop (coder self-verification, Phase 2). The manifest parser is the PUBLISHED platform
+// contract (github.com/denkhaus/dagmar/manifest, ADR-0014 GAP-1 resolved by dagmar-a1e0) — both
+// the platform (.dagger) and this project module depend on it by versioned require.
 func Gate(ctx context.Context, source *dagger.Directory) (string, error) {
 	raw, err := source.File(".dagmar/project.yaml").Contents(ctx)
 	if err != nil {
 		return "", fmt.Errorf("dagmar-gate: read .dagmar/project.yaml: %w", err)
 	}
-	manifest, err := config.ParseManifest([]byte(raw))
+	pm, err := manifest.ParseManifest([]byte(raw))
 	if err != nil {
 		return "", fmt.Errorf("dagmar-gate: %w", err)
 	}
 
 	var summaries []string
-	for _, c := range manifest.Checkables {
+	for _, c := range pm.Checkables {
 		out, exit, err := runCheckable(ctx, source, c)
 		if err != nil {
 			return "", fmt.Errorf("dagmar-gate: checkable %q: %w", c.Name, err)
@@ -47,13 +48,13 @@ func Gate(ctx context.Context, source *dagger.Directory) (string, error) {
 		summaries = append(summaries, fmt.Sprintf("  ✓ %s", c.Name))
 	}
 	return fmt.Sprintf("dagmar-gate: all %d checkable(s) passed\n%s",
-		len(manifest.Checkables), strings.Join(summaries, "\n")), nil
+		len(pm.Checkables), strings.Join(summaries, "\n")), nil
 }
 
 // runCheckable runs one checkable in a golang container and returns (stdout, exitCode, err).
 // The exit code is captured explicitly (DAGMAR_EXIT) with Expect=Any so a non-zero exit yields
 // the output rather than an opaque exec error.
-func runCheckable(ctx context.Context, source *dagger.Directory, c config.Checkable) (string, int, error) {
+func runCheckable(ctx context.Context, source *dagger.Directory, c manifest.Checkable) (string, int, error) {
 	// Derive from the mise-bootstrapped base (bootstrapBase: tools on PATH via mise shims). The
 	// bootstrap layer is a Dagger cache hit once realized by dagmar-bootstrap or a prior checkable.
 	// Override workdir to the checkable's (bootstrapBase mounts /src + sets workdir /src).
