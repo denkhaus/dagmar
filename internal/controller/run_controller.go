@@ -64,6 +64,7 @@ type RunReconciler struct {
 // +kubebuilder:rbac:groups=dagmar.denkhaus.io,resources=runs/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=dagmar.denkhaus.io,resources=runs/finalizers,verbs=update
 // +kubebuilder:rbac:groups=dagmar.denkhaus.io,resources=agents,verbs=get;list;watch
+// +kubebuilder:rbac:groups=dagmar.denkhaus.io,resources=workflows,verbs=get;list;watch
 // +kubebuilder:rbac:groups=dagmar.denkhaus.io,resources=projects,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=pods/exec,verbs=create
@@ -135,18 +136,16 @@ func (r *RunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 			"Run.Spec.ModuleFunction and WorkflowRef are mutually exclusive (ADR-0016 §2)")
 	}
 
-	// 3c. Orchestration Runs (WorkflowRef) are controller-driven pipeline orchestration
-	// (ADR-0016 §4). The controller creates and supervises atomic Sub-Runs. Phase 2
-	// implementation: for now, an orchestration Run is accepted but not yet orchestrated —
-	// the pipeline logic is a follow-up. This early-accept prevents a terminal failure.
+	// 3c. Orchestration Runs (WorkflowRef): drive the pipeline (ADR-0016 §4).
+	// The controller creates and supervises atomic Sub-Runs. Atomic Runs (ModuleFunction)
+	// fall through to the engine-pod + agent-pod path below.
 	if hasWf {
+		// Mark accepted, then orchestrate.
 		_ = r.patchStatus(ctx, run, func(s *v1alpha1.RunStatus) {
 			gen := run.Generation
-			meta.SetStatusCondition(&s.Conditions, runCondition(v1alpha1.RunConditionAccepted, metav1.ConditionTrue, "OrchestrationMode", "orchestration Run accepted; pipeline logic pending", gen))
-			meta.SetStatusCondition(&s.Conditions, runCondition(v1alpha1.RunConditionProgressing, metav1.ConditionFalse, "OrchestrationMode", "pipeline orchestration not yet implemented", gen))
-			s.Phase = v1alpha1.RunPhasePending
+			meta.SetStatusCondition(&s.Conditions, runCondition(v1alpha1.RunConditionAccepted, metav1.ConditionTrue, "OrchestrationMode", "orchestration Run accepted", gen))
 		})
-		return ctrl.Result{}, nil
+		return r.reconcileOrchestration(ctx, run, project)
 	}
 
 	// 3d. For atomic Runs with an AgentRef, read the Agent spec (model, maxAPICalls).
@@ -496,6 +495,7 @@ func (r *RunReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&v1alpha1.Run{}).
 		Owns(&corev1.Pod{}).
+		Owns(&v1alpha1.Run{}). // Sub-Runs created by orchestration Runs (ADR-0016 §4)
 		Named("run").
 		Complete(r)
 }
