@@ -39,6 +39,10 @@ function in the Project module. See ADR-0001; ADR-0018 (Tier-B redefined).
 - **LLM** — Dagger's LLM primitive (`dag.LLM()`); the cognition provider. dagmar does
   not reimplement cognition.
 - **Env** — Dagger environment bundling inputs/outputs/tools for an LLM (`dag.Env()`).
+  Construction: `env.WithWorkspace(source).WithCurrentModule()` (workspace + LLM-Tool hooks,
+  ADR-0021 D2). Built inside the `.dagger` module's `code` function, not by the controller
+  (Tier-A direct in app/, ADR-0010 §3). Hermetic by default (WithCurrentModule only;
+  network tools excluded, ADR-0011).
 - **Workspace** — the project source as a `*dagger.Directory`, passed to the agent's
   `Env` via `env.WithWorkspace(source)`. The checkable (in-loop self-verification) is
   `env.Checks()` — module-annotated check functions discovered by the Env, not a constructor
@@ -52,7 +56,11 @@ function in the Project module. See ADR-0001; ADR-0018 (Tier-B redefined).
   (ADR-0020). Reused both in-loop (agent self-verifies while working) and as the mechanical
   layer of the QualityGate.
 - **Loop** — `dag.LLM(opts).WithEnv(env).WithPromptFile(prompt).Loop()`; the agent
-  cognition loop (v0.21.8: `LLMOpts{Model, MaxAPICalls}`). A Run drives exactly one Loop.
+  cognition loop (v0.21.8: `LLMOpts{Model, MaxAPICalls}`). A Run drives exactly one Loop
+  (ADR-0021). Multi-step tasks = controller orchestration of multiple Sub-Runs (ADR-0016),
+  each driving one Loop. Token budget = `MaxAPICalls` (engine-enforced hard stop);
+  `llm.TokenUsage()` for cost accounting. Prompt is pre-composed by the controller
+  (ADR-0005 merge); the function receives a ready `.md` file.
 - **TokenUsage** — Dagger's cost observability (`agent.TokenUsage()`).
 - **Tool** — Dagger configuration: what an agent may call (`dag.git` / `container` /
   `http` plus Project Hook Service exposures). dagmar coins no Tool type; an Agent's
@@ -216,6 +224,7 @@ seeds `dagmar-3684`, Go module layout & hex arch):
 | `prompt` ref → canopy resolve | `.WithPromptFile(...)` |
 | `tool-set` | tools on `dag.Env()` |
 | `checkable` | `env.Checks()` → `*CheckGroup` (v0.21.8; ADR-0020) |
+| `maxAPICalls` | `LLMOpts{MaxAPACalls}` (ADR-0021 D4) |
 
 ## Open questions (tracked, not yet decided)
 
@@ -243,3 +252,4 @@ See `docs/adr/`:
 - **ADR-0018** — Go port/adapter layer removed; Project Hook Services are Dagger functions; Tracer/Span sole surviving port
 - **ADR-0019** — Project Hook function signatures + introspection conformance; dagmar-prompt supplements (not replaces) ADR-0005 merge
 - **ADR-0020** — Workspace & repository interaction model; ephemeral Directory clones, branch-based lineage, controller-side PR, env.Checks() as checkable
+- **ADR-0021** — Loop-wrapping; code() function, Env in app/, MaxAPICalls budget, multi-step = orchestration, pre-composed prompt
