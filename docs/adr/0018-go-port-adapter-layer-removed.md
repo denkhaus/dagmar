@@ -37,7 +37,7 @@ interface.
 ### D2 — Tracer/Span retained
 
 `Tracer` and `Span` are **observability** interfaces, not Project Hook Services. They survive
-in `ports/` (moved to `ports/tracer.go`). The default implementation (`adapters/otel/`) wraps
+in `ports/` (moved to `ports/tracer.go`). The default implementation (`adapters/otel/`, currently a placeholder) will wrap
 Dagger's built-in OpenTelemetry; Langfuse remains a deferred opt-in behind this port.
 
 ### D3 — Programmatic hooks untouched

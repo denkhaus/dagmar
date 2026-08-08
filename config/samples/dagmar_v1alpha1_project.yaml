@@ -5,7 +5,7 @@ metadata:
   namespace: default
 spec:
   # dagmar develops itself as a registered Project (ADR-0012 dogfooding). Phase 0 carries only
-  # the repo + the agent-pod-image / module-ref Phase-0 reads; hook-binding/credentials/autonomy come
+  # the repo + the agent-pod-image / module-ref Phase-0 reads; hook-service/credentials/autonomy come
   # as the control plane grows.
   repo: https://github.com/denkhaus/dagmar
   agentPodImage: alpine:3.20

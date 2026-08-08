@@ -124,12 +124,7 @@ The CONTEXT.md glossary defines:
 > dagmar Workspace.
 
 This does not match v0.21.8. The actual surface is `Env.WithWorkspace(*Directory)` +
-`Env.Checks()`. The glossary should be updated:
-
-> **Workspace** — the project source as a `*dagger.Directory`, passed to the agent's `Env`
-> via `env.WithWorkspace(source)`. The LLM's checkable (self-verification) is `env.Checks()`,
-> not a constructor argument. Post-Loop changes are captured via `workspace.Update()` →
-> `*Changeset`.
+`Env.Checks()`. The glossary **was updated** in this same commit range — see CONTEXT.md Workspace/checkable entries.
 
 ## Consequences
 

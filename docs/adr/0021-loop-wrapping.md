@@ -53,7 +53,7 @@ Phase 2, the controller dispatches `dagger call -m <ref> code --source <git-dir>
 
 ```go
 // Code is dagmar's coder-loop entry point (Phase 2 cognition).
-// It constructs the Env, drives the LLM Loop, and returns the outcome.
+// It constructs the Env, drives the LLM Loop, and returns the modified workspace Directory.
 // The controller dispatches this via `dagger call -m .dagger code ...`.
 func (m *Dagmar) Code(
     ctx context.Context,
@@ -69,13 +69,17 @@ func (m *Dagmar) Code(
     // +optional
     // +default=100
     maxAPICalls int,
-) (string, error) {
+) (*dagger.Directory, error) {
     return app.Code(ctx, source, promptFile, model, maxAPICalls)
 }
 ```
 
 The function delegates to `app.Code()` — the application-layer binding (ADR-0010 §3: Tier A used
 directly in `app/`). This keeps the main-object seam thin and the logic testable.
+
+> **Correction (Review 26 A2):** the Env uses `WithMainModule(projectModule)` to register
+> the **project module's** hooks, not `WithCurrentModule()` (which would register
+> `.dagger/`'s own functions). See D7 for the corrected hermeticity discussion.
 
 ### D2 — Env construction is in the app layer, not the controller
 
@@ -89,9 +93,11 @@ func Code(ctx context.Context, source *dagger.Directory, promptFile *dagger.File
     model string, maxAPICalls int) (string, error) {
 
     // 1. Build the Env: workspace + project module tools
+    // Load the project module (.dagmar/) so its functions become LLM tools
+    projectMod := dagger.Connect().ModuleSource(".dagmar").AsModule().Sync(ctx)
     env := dagger.Connect().Env().
         WithWorkspace(source).
-        WithCurrentModule()  // registers LLM-Tool hooks (dagmar-issues/memory/prompt)
+        WithMainModule(projectMod)  // registers LLM-Tool hooks (dagmar-issues/memory/prompt)
 
     // 2. Build the LLM
     llm := dagger.Connect().LLM(dagger.LLMOpts{
@@ -102,16 +108,17 @@ func Code(ctx context.Context, source *dagger.Directory, promptFile *dagger.File
         WithPromptFile(promptFile)
 
     // 3. Block on the Loop — the agent works until done or budget exhausted
-    llm, err := llm.Sync(ctx)  // Loop + Sync equivalent
+    llm = llm.Loop()                  // register the loop (lazy)
+    llm, err = llm.Sync(ctx)          // force evaluation — blocks until the agent is done
     if err != nil {
-        return "", fmt.Errorf("code: loop failed: %w", err)
+        return nil, fmt.Errorf("code: loop failed: %w", err)
     }
 
-    // 4. Extract the outcome
-    reply, _ := llm.LastReply(ctx)
-    usage, _ := llm.TokenUsage().TotalTokens(ctx)
+    // 4. Token usage (cost accounting — captured here, not by the controller)
+    _, _ = llm.TokenUsage().TotalTokens(ctx)  // Phase 2: write to Run output
 
-    return fmt.Sprintf("done. reply: %s, tokens: %d", reply, usage), nil
+    // 5. Return the modified workspace
+    return source, nil
 }
 ```
 
@@ -129,7 +136,8 @@ by the **controller's orchestration layer** (ADR-0016 dual-mode Run):
 2. The controller creates **atomic Sub-Runs**, each driving one Loop.
 3. Between Sub-Runs, the controller transitions pipeline state (RED → revise, GREEN → review).
 
-Example: the quality-gate pipeline (ADR-0009):
+Example: the quality-gate pipeline (ADR-0009 provides the pipeline instance; ADR-0016
+provides the orchestration mechanism):
 - Sub-Run 1: **coder** — `dagger call -m .dagger code --source <ws> --prompt <coder.md>` → Loop
 - Sub-Run 2: **reviewer** — `dagger call -m .dagger code --source <ws> --prompt <review.md>` → Loop (different Agent/Prompt, same module function)
 
@@ -204,25 +212,40 @@ For Phase 2 v1, all coder Runs are hermetic: `WithCurrentModule()` only, no netw
 agent works on the workspace, calls hooks for issues/memory/prompts, and self-verifies via
 `env.Checks()`.
 
-### D8 — Post-Loop: Changeset extraction is the function's return, not a separate step
+### D8 — Post-Loop: Code returns the modified workspace Directory
 
-After the Loop completes, the workspace has been modified by the agent. The `code` function does
-NOT extract the diff — that is the controller's job post-Loop (ADR-0020 D3). The function returns
-the agent's last reply + token usage as a string summary. The controller then:
+After the Loop completes, the workspace has been modified by the agent. The `code` function
+returns the **modified workspace as `*dagger.Directory`** — not a string summary. This gives
+the controller a concrete handle to the post-Loop state via a second dispatched function.
 
-1. Reads the modified workspace from the Run's pod (or the engine retains it).
-2. Computes `workspace.Update()` → `*Changeset` → `.AsPatch()` for the diff.
-3. Pushes the branch + creates the PR (ADR-0020 D3).
+The PR flow (ADR-0020 D3) is a **separate controller-dispatched function** on the `.dagger`
+module:
 
-This separation means the `code` function is pure cognition: build Env → drive Loop → return
-outcome. The workspace mutation is a side effect visible to the controller; the controller
-harvests it for the PR flow.
+```go
+// Changeset extracts the diff from a pre-Loop workspace and a post-Loop workspace.
+func (m *Dagmar) Changeset(
+    ctx context.Context,
+    // before is the pre-Loop workspace (the original clone).
+    before *dagger.Directory,
+    // after is the post-Loop workspace (Code's return value).
+    after *dagger.Directory,
+) (*dagger.Changeset, error) {
+    return after.Diff(before), nil  // or equivalent v0.21.8 API
+}
+```
+
+The controller dispatches `Code` first (cognition), then `Changeset` (extraction), then
+pushes the branch + creates the PR (controller-level, ADR-0020 D3).
+
+**Token usage:** `llm.TokenUsage()` is read inside `Code` and written to the Run's output
+(e.g. a sidecar file or struct). The exact mechanism is a Phase-2 implementation detail; the
+design principle is that cost accounting is captured inside the function, not by the controller.
 
 ## Consequences
 
-- **One method on `.dagger` platform module:** `Code(source, promptFile, model, maxAPICalls) → string`.
-  The Phase-0 dispatch pattern (`dagger call -m <ref> <fn>`) extends naturally — `code` is just
-  another function.
+- **Two methods on `.dagger` platform module:** `Code(source, promptFile, model, maxAPICalls) → *dagger.Directory`
+  and `Changeset(before, after) → *dagger.Changeset`. The Phase-0 dispatch pattern
+  (`dagger call -m <ref> <fn>`) extends naturally — both are just functions.
 - **Env is execution-plane, not control-plane:** the K8s controller cannot construct Dagger SDK
   types; it dispatches the function, and the function builds the Env. This is ADR-0010 §3.
 - **Multi-step = orchestration:** the controller sequences Sub-Runs (ADR-0016). Each Sub-Run

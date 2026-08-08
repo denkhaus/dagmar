@@ -39,10 +39,10 @@ function in the Project module. See ADR-0001; ADR-0018 (Tier-B redefined).
 - **LLM** — Dagger's LLM primitive (`dag.LLM()`); the cognition provider. dagmar does
   not reimplement cognition.
 - **Env** — Dagger environment bundling inputs/outputs/tools for an LLM (`dag.Env()`).
-  Construction: `env.WithWorkspace(source).WithCurrentModule()` (workspace + LLM-Tool hooks,
-  ADR-0021 D2). Built inside the `.dagger` module's `code` function, not by the controller
-  (Tier-A direct in app/, ADR-0010 §3). Hermetic by default (WithCurrentModule only;
-  network tools excluded, ADR-0011).
+  Construction: `env.WithWorkspace(source).WithMainModule(projectModule)` (workspace + LLM-Tool
+  hooks from the project's `.dagmar/` module, ADR-0021 D2). Built inside the `.dagger` module's
+  `code` function, not by the controller (Tier-A direct in app/, ADR-0010 §3). Hermetic by
+  default (project module tools only; network tools excluded, ADR-0011).
 - **Workspace** — the project source as a `*dagger.Directory`, passed to the agent's
   `Env` via `env.WithWorkspace(source)`. The checkable (in-loop self-verification) is
   `env.Checks()` — module-annotated check functions discovered by the Env, not a constructor
@@ -61,7 +61,9 @@ function in the Project module. See ADR-0001; ADR-0018 (Tier-B redefined).
   each driving one Loop. Token budget = `MaxAPICalls` (engine-enforced hard stop);
   `llm.TokenUsage()` for cost accounting. Prompt is pre-composed by the controller
   (ADR-0005 merge); the function receives a ready `.md` file.
-- **TokenUsage** — Dagger's cost observability (`agent.TokenUsage()`).
+- **TokenUsage** — Dagger's cost observability (`llm.TokenUsage()` → `*LLMTokenUsage`).
+- **Changeset** — Dagger's diff representation (`workspace.Update()` or `after.Diff(before)` →
+  `*Changeset`); provides `.AsPatch()`, `.Before()`, `.After()`, `.DiffStats()`. Tier-A.
 - **Tool** — Dagger configuration: what an agent may call (`dag.git` / `container` /
   `http` plus Project Hook Service exposures). dagmar coins no Tool type; an Agent's
   permitted tools are its `tool-set` field. A **hermetic** agent = its `tool-set` carries no
@@ -73,13 +75,13 @@ function in the Project module. See ADR-0001; ADR-0018 (Tier-B redefined).
 All three are bound **per-Project** (N+1 contexts: dagmar-own + each target Project —
 dogfooding).
 
-- **IssueTracker** (→ seeds) — create/read/update/close issues (= Tasks); manage
-  dependencies and plans. Canonical work handle.
-- **Memory** (→ mulch) — read/write project expertise (conventions, patterns,
-  failures, decisions); per-Project recall.
-- **Prompts** (→ canopy) — dagmar composes an Agent's prompt by cross-store merging
-  (ADR-0005): dagmar operational mixins (dagmar `.canopy/`) ⊕ project-content prompts
-  (project `.canopy/`); emits the resolved `.md` for `WithPromptFile`.
+- **dagmar-issues** (→ seeds) — the LLM-Tool hook for issue tracking: read/search/create/update
+  issues (= Tasks). Backed by seeds (`sd`) in the project module; vendor-agnostic (ADR-0017/0019).
+- **dagmar-memory** (→ mulch) — the LLM-Tool hook for project expertise: read/search/write
+  conventions, patterns, failures, decisions. Backed by mulch (`ml`) in the project module.
+- **dagmar-prompt** (→ canopy) — the LLM-Tool hook for on-demand project prompt rendering.
+  Supplements (not replaces) the ADR-0005 cross-store merge: the merge is controller-side
+  pre-Loop; the hook is a runtime LLM tool (ADR-0019 D3).
 
 ### Tier C — dagmar core
 
@@ -169,7 +171,7 @@ dogfooding).
 
 **Explicitly not dagmar types:**
 
-- **Plan** — not a Tier-C type (current). A seeds / IssueTracker concept. Planning is
+- **Plan** — not a Tier-C type (current). A seeds concept. Planning is
   done locally (Wayfinder), translated into seeds issues, then agents work the issues.
   (Future direction — human-facing Plan-Agent via a chat interface — recorded in mulch.)
 
@@ -189,6 +191,9 @@ dogfooding).
   Runs and Sub-Runs.
 - **Work hierarchy:** `Project 1:N Tasks`; `Task ≡ 1 seeds issue`; `Task 1:N Runs`.
 - **Workspace:** per-Task base ref; per-Run isolated clone with in/out lineage.
+- **Sub-Run:** an atomic Run created by an orchestration Run (ADR-0016 §2). Each Sub-Run
+  drives exactly one Loop (ADR-0021 D3). A Sub-Run IS an atomic Run — the term specifies
+  its parent relationship, not a different type.
 - **Gating flow:** coder-Run → candidate → **gate (always pre-merge)** → **two green
   lights** (QualityGate ∧ ReviewAgent.approve) → `merge ⟺ both green ∧ authority==auto`;
   else `{revise | escalate}`. The gate is **invariant** — it always runs on the candidate
@@ -204,7 +209,7 @@ dogfooding).
 - **Trigger flow:** Trigger → seeds issue → Task → Run(s).
 - **Project Hook Services:** per-Project Dagger functions; N+1 contexts (ADR-0018).
 - **Two paths to seeds:** the controller observes seeds directly (scheduling/state);
-  agents use the IssueTracker adapter (CRUD issues). Complementary, not redundant.
+  agents use the `dagmar-issues` hook (CRUD issues, ADR-0019). Complementary, not redundant.
 
 ## CRD boundary
 
@@ -224,7 +229,7 @@ seeds `dagmar-3684`, Go module layout & hex arch):
 | `prompt` ref → canopy resolve | `.WithPromptFile(...)` |
 | `tool-set` | tools on `dag.Env()` |
 | `checkable` | `env.Checks()` → `*CheckGroup` (v0.21.8; ADR-0020) |
-| `maxAPICalls` | `LLMOpts{MaxAPACalls}` (ADR-0021 D4) |
+| `maxAPICalls` | `LLMOpts{MaxAPICalls}` (ADR-0021 D4) |
 
 ## Open questions (tracked, not yet decided)
 

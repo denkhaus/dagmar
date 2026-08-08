@@ -158,7 +158,8 @@ This resolves the ADR-0017 §8 asymmetry cleanly:
 ### D4 — Conformance check via Dagger introspection
 
 dagmar verifies that a project module exposes all required hooks **before a Run starts** (fail
-fast). The check uses Dagger's introspection API:
+fast). The check uses Dagger's introspection API (`Module.Objects(ctx)` → `ObjectTypeDef.Functions(ctx)`,
+not a non-existent `Module.Functions()` — Review 26 A3 correction):
 
 ```go
 // Load the project module from source
@@ -166,14 +167,17 @@ src := dag.ModuleSource(projectModuleRef)  // e.g., ".dagmar"
 mod := src.AsModule()
 mod, err := mod.Sync(ctx)  // force load + validate
 
-// Enumerate functions
-funcs, err := mod.Functions(ctx)
-
-// Build name → function map
+// Enumerate functions: Module has no Functions() method in v0.21.8.
+// The path is: mod.Objects(ctx) → []TypeDef → each AsObject().Functions(ctx)
 hookFns := make(map[string]*dagger.Function)
-for _, fn := range funcs {
-    name, _ := fn.Name(ctx)  // kebab-case, e.g. "dagmar-issues"
-    hookFns[name] = &fn
+objects, err := mod.Objects(ctx)
+for _, td := range objects {
+    obj := td.AsObject()
+    fns, err := obj.Functions(ctx)
+    for _, fn := range fns {
+        name, _ := fn.Name(ctx)  // kebab-case, e.g. "dagmar-issues"
+        hookFns[name] = &fn
+    }
 }
 
 // Check required hooks

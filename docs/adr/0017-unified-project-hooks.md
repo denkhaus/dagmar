@@ -165,14 +165,20 @@ implements `dagmar-issues` differently; dagmar sees the same interface.
 
 ### 8. Hook-vs-port relationship (ADR-0001 Tier B)
 
-The Tier-B adapter ports (`IssueTracker`, `Memory`, `Prompts` in `.dagger/internal/ports/`) are
+> **Superseded by ADR-0018:** the Tier-B Go adapter ports (`IssueTracker`, `Memory`, `Prompts`
+> in `.dagger/internal/ports/`) described below were **deleted**. The abstraction boundary is the
+> Dagger function name, not a Go interface. This section is retained for historical context; the
+> live architecture is: LLM-Tool hooks are registered via `WithMainModule(projectModule)` and
+> called natively by the LLM — no port, no adapter bridge (ADR-0018 D1/D4, ADR-0019 D2, ADR-0021 D2).
+
+~~The Tier-B adapter ports (`IssueTracker`, `Memory`, `Prompts` in `.dagger/internal/ports/`) are
 dagmar's **internal** domain interfaces — they define what dagmar's domain code calls. The project
 hooks (`dagmar-issues`/`dagmar-memory`/`dagmar-prompt`) are the **external** conformance surface —
 how the project implements the adapter. The adapter implementation in
 the platform will call the project's hooks by module-ref, satisfying the
 port. This preserves Tier-B discipline: dagmar's domain sees only the port; the adapter bridges
 port → project hook. Backing-service CLI names (`sd`, `ml`, `cn`) appear only inside the
-project's hook implementation, never in dagmar's adapter or domain code.
+project's hook implementation, never in dagmar's adapter or domain code.~~
 
 > **Asymmetry for `dagmar-prompt`** (resolved by ADR-0019): `dagmar-issues` and
 > `dagmar-memory` are thin delegations (port → project hook). `dagmar-prompt` **supplements**

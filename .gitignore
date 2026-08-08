@@ -14,3 +14,6 @@ go.work.sum
 # NEVER commit; each developer's local file.
 .envrc
 .env
+
+# Prime Agent skills lock (infrastructure artifact)
+skills-lock.json

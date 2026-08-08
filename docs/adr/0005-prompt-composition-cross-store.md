@@ -7,6 +7,11 @@
 
 ## Context
 
+> **Note (ADR-0018):** this ADR references the Go port/adapter layer (`IssueTracker`,
+> `Memory`, `Prompts`) for prompt composition. That layer was removed in ADR-0018; prompt
+> composition now reads `.canopy/` directly. The cross-store merge decision itself is
+> unaffected — only the implementation mechanism changed.
+
 Each Project holds its own canopy store (`.canopy/`) with **project-content** prompts
 (the project's role/task/domain specifics, mulch deps). dagmar holds **operational**
 prompts (output-format, review-gating, safety/autonomy-bounds, tool-rules) in its own,
