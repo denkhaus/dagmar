@@ -39,15 +39,20 @@ function in the Project module. See ADR-0001; ADR-0018 (Tier-B redefined).
 - **LLM** — Dagger's LLM primitive (`dag.LLM()`); the cognition provider. dagmar does
   not reimplement cognition.
 - **Env** — Dagger environment bundling inputs/outputs/tools for an LLM (`dag.Env()`).
-- **CodeWorkspace** — `CodeWorkspace(source, checkable)`; the Tier-A projection of a
-  dagmar Workspace.
+- **Workspace** — the project source as a `*dagger.Directory`, passed to the agent's
+  `Env` via `env.WithWorkspace(source)`. The checkable (in-loop self-verification) is
+  `env.Checks()` — module-annotated check functions discovered by the Env, not a constructor
+  argument. Post-Loop changes captured via `workspace.Update()` → `*Changeset`.
+  (ADR-0020: `CodeWorkspace(source, checkable)` was a pre-API conceptual design; v0.21.8 uses
+  `Env.WithWorkspace` + `Env.Checks`.)
 - **checkable** — the project's mechanical self-verification (build/test/lint), defined
   per-project **in code** inside the `dagmar-gate` Dagger function (ADR-0017 §3; formerly
-  manifest-declared per ADR-0003, superseded). Also a Tier-A Dagger concept: the
-  `CodeWorkspace(source, checkable)` parameter. Reused both in-loop (agent self-verifies while
-  working) and as the mechanical layer of the QualityGate.
-- **Loop** — `dag.LLM().WithEnv(env).WithPromptFile(prompt).Loop()`; the agent
-  cognition loop. A Run drives exactly one Loop.
+  manifest-declared per ADR-0003, superseded). In v0.21.8, in-loop self-verification runs via
+  `env.Checks()` → `*CheckGroup` — module-annotated check functions discovered by the Env
+  (ADR-0020). Reused both in-loop (agent self-verifies while working) and as the mechanical
+  layer of the QualityGate.
+- **Loop** — `dag.LLM(opts).WithEnv(env).WithPromptFile(prompt).Loop()`; the agent
+  cognition loop (v0.21.8: `LLMOpts{Model, MaxAPICalls}`). A Run drives exactly one Loop.
 - **TokenUsage** — Dagger's cost observability (`agent.TokenUsage()`).
 - **Tool** — Dagger configuration: what an agent may call (`dag.git` / `container` /
   `http` plus Project Hook Service exposures). dagmar coins no Tool type; an Agent's
@@ -127,10 +132,12 @@ dogfooding).
 - **Sandbox** — an isolated execution slot subordinate to the Engine
   (`Engine ⊃ Sandbox`); the credentialed (per-Run projected secret subset; ADR-0007),
   resource-bounded pod + engine-session an Agent process runs in. `1 Run : 1 Sandbox`.
-- **Workspace** — a task-scoped, Run-isolated clone of a Project on a branch + its
-  checkable; handed to Dagger as a CodeWorkspace. Strictly isolated per Run (no shared
-  clone — avoids file-change collisions); Workspace lineage across a Task's Runs
-  (Run-out → next Run-in). Final output → diff → PR.
+- **Workspace** — a task-scoped, Run-isolated clone of a Project on a branch
+  (`dagmar/<run-name>`); handed to the agent's Env as a `*dagger.Directory` via
+  `env.WithWorkspace(source)`. Ephemeral (engine git-fetch cache, no persistent volume,
+  ADR-0020 D1). Strict isolation per Run (no shared clone); lineage via git branches
+  (Run-out → next Run-in from branch head). Post-Loop: `workspace.Update()` → `*Changeset`
+  → controller pushes branch + creates PR (agents never hold push authority, ADR-0006/0007).
 
 **In-repo manifest (not a CRD):**
 
@@ -208,7 +215,7 @@ seeds `dagmar-3684`, Go module layout & hex arch):
 | `model` | `dag.LLM(LLMOpts{Model})` |
 | `prompt` ref → canopy resolve | `.WithPromptFile(...)` |
 | `tool-set` | tools on `dag.Env()` |
-| `checkable` | `CodeWorkspace(source, checkable)` |
+| `checkable` | `env.Checks()` → `*CheckGroup` (v0.21.8; ADR-0020) |
 
 ## Open questions (tracked, not yet decided)
 
@@ -235,3 +242,4 @@ See `docs/adr/`:
 - **ADR-0017** — Unified Project Hooks (everything is Dagger code; checkables move into dagmar-gate; LLM-Tool hooks)
 - **ADR-0018** — Go port/adapter layer removed; Project Hook Services are Dagger functions; Tracer/Span sole surviving port
 - **ADR-0019** — Project Hook function signatures + introspection conformance; dagmar-prompt supplements (not replaces) ADR-0005 merge
+- **ADR-0020** — Workspace & repository interaction model; ephemeral Directory clones, branch-based lineage, controller-side PR, env.Checks() as checkable
