@@ -20,4 +20,4 @@ pre-push:
       # before it wastes a CI run.
       # `mise exec --` so the dagger shim resolves under lefthook's non-interactive shell
       # (dagger CLI is in mise.toml, pinned to the engine version).
-      run: mise exec -- dagger call -m .dagmar dagmar-gate --source .
+      run: mise exec -- dagger call -m .dagmar dagmar-gate --source . --github-token env:GITHUB_TOKEN

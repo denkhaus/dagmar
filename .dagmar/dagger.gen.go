@@ -205,7 +205,14 @@ func invoke(ctx context.Context, parentJSON []byte, parentName string, fnName st
 					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg source", err))
 				}
 			}
-			return (*Dagmar).DagmarBootstrap(&parent, ctx, source)
+			var githubToken *dagger.Secret
+			if inputArgs["githubToken"] != nil {
+				err = json.Unmarshal([]byte(inputArgs["githubToken"]), &githubToken)
+				if err != nil {
+					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg githubToken", err))
+				}
+			}
+			return (*Dagmar).DagmarBootstrap(&parent, ctx, source, githubToken)
 		case "DagmarGate":
 			var parent Dagmar
 			err = json.Unmarshal(parentJSON, &parent)
@@ -219,7 +226,14 @@ func invoke(ctx context.Context, parentJSON []byte, parentName string, fnName st
 					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg source", err))
 				}
 			}
-			return (*Dagmar).DagmarGate(&parent, ctx, source)
+			var githubToken *dagger.Secret
+			if inputArgs["githubToken"] != nil {
+				err = json.Unmarshal([]byte(inputArgs["githubToken"]), &githubToken)
+				if err != nil {
+					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg githubToken", err))
+				}
+			}
+			return (*Dagmar).DagmarGate(&parent, ctx, source, githubToken)
 		default:
 			return nil, fmt.Errorf("unknown function %s", fnName)
 		}

@@ -24,7 +24,7 @@ import (
 // AND in-loop (coder self-verification, Phase 2). The manifest parser is the PUBLISHED platform
 // contract (github.com/denkhaus/dagmar/manifest, ADR-0014 GAP-1 resolved by dagmar-a1e0) — both
 // the platform (.dagger) and this project module depend on it by versioned require.
-func Gate(ctx context.Context, source *dagger.Directory) (string, error) {
+func Gate(ctx context.Context, source *dagger.Directory, githubToken *dagger.Secret) (string, error) {
 	raw, err := source.File(".dagmar/project.yaml").Contents(ctx)
 	if err != nil {
 		return "", fmt.Errorf("dagmar-gate: read .dagmar/project.yaml: %w", err)
@@ -36,7 +36,7 @@ func Gate(ctx context.Context, source *dagger.Directory) (string, error) {
 
 	var summaries []string
 	for _, c := range pm.Checkables {
-		out, exit, err := runCheckable(ctx, source, c)
+		out, exit, err := runCheckable(ctx, source, c, githubToken)
 		if err != nil {
 			return "", fmt.Errorf("dagmar-gate: checkable %q: %w", c.Name, err)
 		}
@@ -54,11 +54,11 @@ func Gate(ctx context.Context, source *dagger.Directory) (string, error) {
 // runCheckable runs one checkable in a golang container and returns (stdout, exitCode, err).
 // The exit code is captured explicitly (DAGMAR_EXIT) with Expect=Any so a non-zero exit yields
 // the output rather than an opaque exec error.
-func runCheckable(ctx context.Context, source *dagger.Directory, c manifest.Checkable) (string, int, error) {
+func runCheckable(ctx context.Context, source *dagger.Directory, c manifest.Checkable, githubToken *dagger.Secret) (string, int, error) {
 	// Derive from the mise-bootstrapped base (bootstrapBase: tools on PATH via mise shims). The
 	// bootstrap layer is a Dagger cache hit once realized by dagmar-bootstrap or a prior checkable.
 	// Override workdir to the checkable's (bootstrapBase mounts /src + sets workdir /src).
-	ctr := bootstrapBase(source).
+	ctr := bootstrapBase(source, githubToken).
 		WithWorkdir(path.Join("/src", c.Workdir))
 	for k, v := range c.Env {
 		ctr = ctr.WithEnvVariable(k, v)

@@ -34,8 +34,12 @@ func (m *Dagmar) DagmarBootstrap(
 	ctx context.Context,
 	// source is the Project's source tree (CI contract: `dagger call -m .dagmar dagmar-bootstrap --source .`).
 	source *dagger.Directory,
+	// githubToken authenticates ubi GitHub-API calls (avoids rate-limiting). Optional: nil = unauthenticated.
+	// Pass via `--github-token env:GITHUB_TOKEN` (dagger reads from the local environment as a Secret).
+	// +optional
+	githubToken *dagger.Secret,
 ) (string, error) {
-	return workflows.Bootstrap(ctx, source)
+	return workflows.Bootstrap(ctx, source, githubToken)
 }
 
 // DagmarGate is dagmar's gate-family VERIFY step (ADR-0009 §2 / ADR-0012 §4): an always-Dagger
@@ -47,6 +51,10 @@ func (m *Dagmar) DagmarGate(
 	ctx context.Context,
 	// source is the Project's source tree (CI contract: `dagger call -m .dagmar dagmar-gate --source .`).
 	source *dagger.Directory,
+	// githubToken authenticates ubi GitHub-API calls (avoids rate-limiting). Optional: nil = unauthenticated.
+	// Pass via `--github-token env:GITHUB_TOKEN` (dagger reads from the local environment as a Secret).
+	// +optional
+	githubToken *dagger.Secret,
 ) (string, error) {
-	return workflows.Gate(ctx, source)
+	return workflows.Gate(ctx, source, githubToken)
 }

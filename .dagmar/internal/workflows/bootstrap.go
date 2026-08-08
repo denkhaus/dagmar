@@ -27,8 +27,8 @@ const bootstrapBaseImage = "debian:12-slim"
 // NOTE: `mise install` rolls out ALL mise.toml tools (single source). A few are dev/runner-only
 // (lefthook, nushell, golangci-lint) and unused inside a checkable; installing them is the cost of
 // one config, amortized by the layer cache. Narrow to a subset only if CI overhead bites.
-func bootstrapBase(source *dagger.Directory) *dagger.Container {
-	return dagger.Connect().Container().
+func bootstrapBase(source *dagger.Directory, githubToken *dagger.Secret) *dagger.Container {
+	ctr := dagger.Connect().Container().
 		From(bootstrapBaseImage).
 		// Prereqs for the mise installer (curl + TLS roots).
 		WithExec([]string{"sh", "-c", "apt-get update && apt-get install -y --no-install-recommends curl ca-certificates"}).
@@ -36,7 +36,16 @@ func bootstrapBase(source *dagger.Directory) *dagger.Container {
 		WithExec([]string{"sh", "-c", "curl -fsSL https://mise.run | sh"}).
 		// Project source (mise.toml lives here) + workdir so trust/install resolve it.
 		WithMountedDirectory("/src", source).
-		WithWorkdir("/src").
+		WithWorkdir("/src")
+
+	// Authenticate GitHub API calls (ubi reads GITHUB_TOKEN from env automatically). WithSecretVariable
+	// (NOT WithEnvVariable) so the token is not baked into the cache key nor exposed in exec output.
+	// nil-safe: callers without a token work unauthenticated as before (60 req/hr — dagmar-233c).
+	if githubToken != nil {
+		ctr = ctr.WithSecretVariable("GITHUB_TOKEN", githubToken)
+	}
+
+	return ctr.
 		// Trust the project config non-interactively, then roll out the toolchain.
 		WithExec([]string{"sh", "-c", "/root/.local/bin/mise trust && /root/.local/bin/mise install"}).
 		// mise shims (+ the mise binary) on PATH so checkables resolve go/betterleaks directly.
@@ -47,10 +56,10 @@ func bootstrapBase(source *dagger.Directory) *dagger.Container {
 // (mise.toml) into the gate container. Run once per workspace before verification — by CI, lefthook
 // pre-push, or the agent setup. dagmar-gate derives its checkables from the same bootstrapped
 // base, so the rollout is realized once (Dagger-cached) and reused.
-func Bootstrap(ctx context.Context, source *dagger.Directory) (string, error) {
+func Bootstrap(ctx context.Context, source *dagger.Directory, githubToken *dagger.Secret) (string, error) {
 	// Run `mise ls` to force realization of the mise-install layer (otherwise the chain is lazy)
 	// and report the rolled-out toolchain. A failure here means the rollout itself failed.
-	out, err := bootstrapBase(source).
+	out, err := bootstrapBase(source, githubToken).
 		WithExec([]string{"sh", "-c", "/root/.local/bin/mise ls"}).
 		Stdout(ctx)
 	if err != nil {
