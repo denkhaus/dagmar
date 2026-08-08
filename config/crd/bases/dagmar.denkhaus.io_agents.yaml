@@ -4,24 +4,25 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.21.0
-  name: runs.dagmar.denkhaus.io
+  name: agents.dagmar.denkhaus.io
 spec:
   group: dagmar.denkhaus.io
   names:
-    kind: Run
-    listKind: RunList
-    plural: runs
+    kind: Agent
+    listKind: AgentList
+    plural: agents
     shortNames:
-    - run
-    singular: run
+    - agent
+    singular: agent
   scope: Namespaced
   versions:
   - name: v1alpha1
     schema:
       openAPIV3Schema:
         description: |-
-          Run is one execution of an Agent, in one Sandbox, on one Workspace — the observable,
-          reconciled execution unit (the resource the dagmar controller reconciles).
+          Agent is a durable role/persona (coder, reviewer, researcher): model + prompt + budget +
+          tool-set policy. Materialized as Runs; the controller reads an Agent's spec to configure
+          the code() function (ADR-0021 D1). Agents have no merge authority (ADR-0006).
         properties:
           apiVersion:
             description: |-
@@ -42,40 +43,60 @@ spec:
             type: object
           spec:
             description: |-
-              RunSpec defines one execution of an Agent in one Sandbox on one Workspace — the observable,
-              reconciled execution unit (CONTEXT.md). Phase 0 carries the module-call the agent pod runs;
-              the Agent reference (model/prompt/tool-set) is added in Phase 2 (cognition).
+              AgentSpec defines a durable role/persona (coder, reviewer, researcher). An Agent is
+              materialized as Runs — it carries the LLM configuration the controller passes to the
+              code() function (ADR-0021 D1). Agents have no merge authority (ADR-0006); the merge tool
+              is in no Agent's tool-set.
             properties:
-              moduleArgs:
-                description: ModuleArgs are the CLI args passed to the function (e.g.
-                  ["--image","alpine:3.20"]).
-                items:
-                  type: string
-                type: array
-              moduleFunction:
+              maxAPICalls:
+                default: 100
                 description: |-
-                  ModuleFunction is the dagmar module function the agent pod calls via `dagger call`
-                  (e.g. "sandbox", "probe-net"). Phase 0 uses the existing module surface; the coder-Loop
-                  function is Phase 2.
+                  MaxAPICalls bounds the LLM API calls per Run (ADR-0021 D4). Engine-enforced
+                  hard stop: when exhausted, the Loop terminates and the Run fails (gate RED).
+                  Default 100 when unset.
+                type: integer
+              model:
+                description: |-
+                  Model is the LLM model identifier passed to dag.LLM(LLMOpts{Model}).
+                  Examples: "anthropic/claude-sonnet-4", "openai/gpt-4o".
                 type: string
-              projectRef:
-                description: ProjectRef names the Project (in the Run's namespace)
-                  this Run executes under.
+              prompt:
+                description: |-
+                  Prompt references canopy prompt templates for cross-store composition (ADR-0005).
+                  The controller resolves project prompt + dagmar mixins into the final .md
+                  before dispatching the code() function.
+                properties:
+                  dagmarMixins:
+                    description: |-
+                      DagmarMixins are canopy mixin names from dagmar's own .canopy/ store.
+                      These are operational mixins (output-format, review-gating, safety, tool-rules).
+                      At least one mixin is expected; dagmar controls the final composed output (ADR-0005).
+                    items:
+                      type: string
+                    type: array
+                  projectPrompt:
+                    description: |-
+                      ProjectPrompt is the canopy prompt name in the project's .canopy/ store.
+                      This is the project-content prompt (role/task/domain specifics).
+                    type: string
+                required:
+                - projectPrompt
+                type: object
+              toolSetPolicy:
+                default: hermetic
+                description: |-
+                  ToolSetPolicy controls the network/tool surface on the Agent's Env (ADR-0011).
+                  "hermetic" (default) excludes network-capable tools; "networked" allows them.
                 type: string
             required:
-            - moduleFunction
-            - projectRef
+            - model
+            - prompt
             type: object
           status:
             description: |-
-              RunStatus holds the observed state of a Run. Phase 0 = status conditions + phase only
-              (ADR-0012 §2 SPEC-1: requeue/error-backoff/finalizers deferred to the control-plane-design
-              seed).
+              AgentStatus holds the observed state of an Agent. Minimal — Agent is a definition/template
+              (like Prompt, QualityGate); it has no reconciliation of its own. Runs reference it.
             properties:
-              agentPodName:
-                description: AgentPodName is the name of the owned pod executing the
-                  module call.
-                type: string
               conditions:
                 items:
                   description: Condition contains details for one aspect of the current
@@ -132,12 +153,6 @@ spec:
                   - type
                   type: object
                 type: array
-              phase:
-                description: |-
-                  Phase is the high-level lifecycle phase (Pending|Running|Succeeded|Failed), DERIVED from the
-                  condition set via phaseFromConditions (a read-optimized summary for k9s/back-compat; the
-                  RunCondition* types are the source of truth, ADR-0013 D5).
-                type: string
             type: object
         type: object
     served: true
