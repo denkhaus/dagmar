@@ -42,18 +42,34 @@ flows, API calls, typed I/O, proper error handling — uniformly.
 
 ### 2. Project Hook registry (convention)
 
+Project Hooks fall into two categories by **caller**:
+
+**Programmatic hooks** — called by dagmar's controller/infrastructure, not exposed to the LLM:
+
 | Hook | Function name | Purpose | ADR |
 |------|---------------|---------|-----|
 | Bootstrap | `dagmar-bootstrap` | Roll out the project's toolchain into the gate container | ADR-0009 §2 / ADR-0012 §4 |
 | Gate | `dagmar-gate` | Run the project's self-verification (build/test/lint/scan) | ADR-0009 §2 / ADR-0012 §4 |
+
+**LLM-Tool hooks** — exposed as Dagger tools on the agent's `Env`, called by the LLM during the
+loop:
+
+| Hook | Function name | Purpose | ADR |
+|------|---------------|---------|-----|
 | Issues | `dagmar-issues` | Read/create issues (the project's Task handle) | This ADR |
 | Memory | `dagmar-memory` | Read/write project expertise | This ADR |
 | Prompt | `dagmar-prompt` | Compose the agent's prompt | This ADR |
 
-A Project must expose `dagmar-bootstrap` + `dagmar-gate` (required conformance, ADR-0009). The
-os-eco hooks (`dagmar-issues`, `dagmar-memory`, `dagmar-prompt`) are **optional** — a Project
-without them operates without those capabilities (no issue tracking, no memory recall, no prompt
-composition). When present, dagmar uses them; when absent, dagmar degrades gracefully.
+When an LLM agent operates on a Project (Phase 2+), **all three LLM-Tool hooks are mandatory** —
+dagmar registers them on the `Env` unconditionally. A Project that does not use a capability
+implements it as a **noop** (e.g. `dagmar-memory` returning an empty string) rather than omitting
+the function. This guarantees the LLM's tool-surface is predictable: the agent always has the same
+tools available, regardless of Project. A Project that genuinely lacks issue tracking provides a
+noop, not a missing function.
+
+All hooks are vendor-agnostic: the function name is the contract, not the implementation. A
+Project using Linear instead of seeds implements `dagmar-issues` with the Linear API; dagmar
+calls `dagmar-issues` either way.
 
 ### 3. Checkables move into `dagmar-gate` (manifest checkables superseded)
 
@@ -89,9 +105,10 @@ moving into `dagmar-gate`, these types lose their consumer. The module is not de
 ADR (it may carry future manifest metadata types), but `Checkable`/`ParseManifest`/`validateWorkdir`
 are deprecated and will be removed when `dagmar-gate` is refactored to in-code checks.
 
-### 6. os-eco hooks are hermetic in the tool-surface sense (ADR-0011)
+### 6. LLM-Tool hooks are hermetic in the tool-surface sense (ADR-0011)
 
-`dagmar-issues`, `dagmar-memory`, `dagmar-prompt` operate on the project's worktree
+The LLM-Tool hooks (`dagmar-issues`, `dagmar-memory`, `dagmar-prompt`) operate on the project's
+worktree
 (`.seeds/`, `.mulch/`, `.canopy/` are directories in the mounted source). They are file
 operations — read, write, edit local files. They do not *use* network within the hermetic loop.
 Remote sync (`sd sync`, `ml sync`, `git push`) happens outside the loop, as a networked controller
@@ -105,9 +122,9 @@ v0.21.8). This is the same calculated residual risk ADR-0011 accepts for all her
 
 ### 7. Tier-B discipline preserved (ADR-0001)
 
-os-eco CLI names (`sd`, `ml`, `cn`) appear **only** inside the Project's hook implementations —
-never in dagmar's domain code. dagmar calls `dagmar-issues`/`dagmar-memory`/`dagmar-prompt`; what
-CLI or library backs them is the Project's choice. A Project using Linear instead of seeds
+Backing-service names (`sd`, `ml`, `cn`) appear **only** inside the Project's hook implementations
+— never in dagmar's domain code. dagmar calls `dagmar-issues`/`dagmar-memory`/`dagmar-prompt`; what
+CLI, library, or API backs them is the Project's choice. A Project using Linear instead of seeds
 implements `dagmar-issues` differently; dagmar sees the same interface.
 
 ## Consequences
@@ -120,11 +137,11 @@ implements `dagmar-issues` differently; dagmar sees the same interface.
   is fully in code, not split between YAML (checkables) and code (dispatch).
 - **ADR-0013 §5 D12:** the manifest-declared bash-command os-eco binding mechanism
   (the five hermeticity rules, `issues_read`/`issues_write` tool names, feasibility gate) is
-  **replaced** by ADR-0017's named-function approach. The os-eco hooks are convention-named Dagger
+  **replaced** by ADR-0017's named-function approach. The LLM-Tool hooks are convention-named Dagger
   module functions, not manifest-declared commands wrapped into LLM tools by dagmar.
-- **ADR-0014:** the `.dagmar/` project module grows three optional functions
-  (`dagmar-issues`/`dagmar-memory`/`dagmar-prompt`). The manifest library (manifest/) loses its
-  primary types over time.
+- **ADR-0014:** the `.dagmar/` project module grows three mandatory LLM-Tool hook
+  functions (`dagmar-issues`/`dagmar-memory`/`dagmar-prompt`), mandatory when an LLM agent is
+  involved. The manifest library (manifest/) loses its primary types over time.
 - **dagmar-gate refactoring:** the current gate.go reads `.dagmar/project.yaml` and dispatches
   checkables generically. Post-ADR, gate.go contains the checkable definitions directly as Go
   code. This is a Phase-2 implementation task (the current gate works; this ADR is the decision
@@ -134,37 +151,21 @@ implements `dagmar-issues` differently; dagmar sees the same interface.
   change is required by this ADR. Code comments and `.dagmar/project.yaml` that reference the old
   "manifest = what, gate = how" model are **intentionally stale** until the Phase-2 refactor.
 
-### 8. Caller model and hook-vs-port relationship
+### 8. Hook-vs-port relationship (ADR-0001 Tier B)
 
-**Caller.** The os-eco hooks serve **both** callers:
-
-- **LLM tools:** when dagmar registers the project module's functions on the agent's `Env`, the
-  LLM can call `dagmar-issues`/`dagmar-memory`/`dagmar-prompt` as tools during its loop. This
-  replaces ADR-0013 §5 D12's manifest-declared `issues_read`/`issues_write` tool names — the tool
-  IS the named Dagger function, not a wrapped bash command.
-- **Infrastructure hooks:** dagmar's controller may call `dagmar-prompt` during Run setup to
-  compose the prompt before the loop starts (not an LLM call — a controller dispatch).
-
-**Hook vs. port (ADR-0001 Tier B).** The Tier-B adapter ports (`IssueTracker`, `Memory`,
-`Prompts` in `.dagger/internal/ports/`) are dagmar's **internal** domain interfaces — they define
-what dagmar's domain code calls. The project hooks (`dagmar-issues`/`dagmar-memory`/`dagmar-prompt`)
-are the **external** conformance surface — how the project implements the adapter. The adapter
-implementation in `.dagger/internal/adapters/oseco/` will call the project's hooks by module-ref,
-satisfying the port. This preserves Tier-B discipline: dagmar's domain sees only the port; the
-adapter bridges port → project hook. os-eco CLI names (`sd`, `ml`, `cn`) appear only inside the
+The Tier-B adapter ports (`IssueTracker`, `Memory`, `Prompts` in `.dagger/internal/ports/`) are
+dagmar's **internal** domain interfaces — they define what dagmar's domain code calls. The project
+hooks (`dagmar-issues`/`dagmar-memory`/`dagmar-prompt`) are the **external** conformance surface —
+how the project implements the adapter. The adapter implementation in
+`.dagger/internal/adapters/oseco/` will call the project's hooks by module-ref, satisfying the
+port. This preserves Tier-B discipline: dagmar's domain sees only the port; the adapter bridges
+port → project hook. Backing-service CLI names (`sd`, `ml`, `cn`) appear only inside the
 project's hook implementation, never in dagmar's adapter or domain code.
 
-**Signature specification.** The exact Go signatures for `dagmar-issues`/`dagmar-memory`/`dagmar-prompt`
-(inputs, outputs, error contract) are **deferred to ADR-0018** (os-eco hook contract). ADR-0017
-decides the pattern (named Dagger module functions, convention-called) and the caller model;
-ADR-0018 fixes the types. This two-step mirrors how ADR-0009 (pattern) preceded ADR-0012 §4
-(alignment).
-
-**Optional-hook detection.** dagmar detects optional hooks at dispatch time by probing the
-project module's function list (Dagger module introspection). If `dagmar-issues` is present, it
-is registered on the `Env` / called through the adapter; if absent, the capability is not
-available. "Degrades gracefully" = the agent operates without that tool; it does not fail. This
-mechanism is implemented in Phase 2 alongside the coder-loop; today the hooks are design-only.
+**Signature specification.** The exact Go signatures for the LLM-Tool hooks
+(`dagmar-issues`/`dagmar-memory`/`dagmar-prompt`: inputs, outputs, error contract) are **deferred
+to ADR-0018** (Project Hook contract). ADR-0017 decides the pattern (named Dagger module
+functions, two caller categories) and the hook-vs-port relationship; ADR-0018 fixes the types.
 
 ## Alternatives considered
 
