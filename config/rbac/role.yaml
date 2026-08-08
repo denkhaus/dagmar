@@ -42,6 +42,7 @@ rules:
 - apiGroups:
   - dagmar.denkhaus.io
   resources:
+  - agents
   - projects
   verbs:
   - get

@@ -63,6 +63,7 @@ type RunReconciler struct {
 // +kubebuilder:rbac:groups=dagmar.denkhaus.io,resources=runs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=dagmar.denkhaus.io,resources=runs/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=dagmar.denkhaus.io,resources=runs/finalizers,verbs=update
+// +kubebuilder:rbac:groups=dagmar.denkhaus.io,resources=agents,verbs=get;list;watch
 // +kubebuilder:rbac:groups=dagmar.denkhaus.io,resources=projects,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=pods/exec,verbs=create
@@ -119,12 +120,51 @@ func (r *RunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		}
 	}
 
-	// 3b. ModuleFunction is the other load-bearing Phase-0 read: the function the agent pod calls.
-	// Empty → terminal config error (symmetric with ModuleRef; review-13 HOUSE-4 — otherwise the
-	// pod runs `dagger call -m <ref>` with no function and fails at runtime, mirrored opaquely).
-	if run.Spec.ModuleFunction == "" {
-		return ctrl.Result{}, r.failRun(ctx, run, "ModuleFunctionRequired",
-			"Run.Spec.ModuleFunction is empty; it must name the module function for `dagger call`")
+	// 3b. Dual-mode validation (ADR-0016 §2): a Run must have exactly one of
+	// ModuleFunction (atomic) or WorkflowRef (orchestration). Neither or both is a
+	// terminal config error. For atomic Runs with an AgentRef, the controller reads
+	// the Agent spec to configure the code() function call (model, maxAPICalls).
+	hasFn := run.Spec.ModuleFunction != ""
+	hasWf := run.Spec.WorkflowRef != ""
+	if !hasFn && !hasWf {
+		return ctrl.Result{}, r.failRun(ctx, run, "ModuleFunctionOrWorkflowRefRequired",
+			"Run must set either ModuleFunction (atomic) or WorkflowRef (orchestration)")
+	}
+	if hasFn && hasWf {
+		return ctrl.Result{}, r.failRun(ctx, run, "ModuleFunctionAndWorkflowRefMutuallyExclusive",
+			"Run.Spec.ModuleFunction and WorkflowRef are mutually exclusive (ADR-0016 §2)")
+	}
+
+	// 3c. Orchestration Runs (WorkflowRef) are controller-driven pipeline orchestration
+	// (ADR-0016 §4). The controller creates and supervises atomic Sub-Runs. Phase 2
+	// implementation: for now, an orchestration Run is accepted but not yet orchestrated —
+	// the pipeline logic is a follow-up. This early-accept prevents a terminal failure.
+	if hasWf {
+		_ = r.patchStatus(ctx, run, func(s *v1alpha1.RunStatus) {
+			gen := run.Generation
+			meta.SetStatusCondition(&s.Conditions, runCondition(v1alpha1.RunConditionAccepted, metav1.ConditionTrue, "OrchestrationMode", "orchestration Run accepted; pipeline logic pending", gen))
+			meta.SetStatusCondition(&s.Conditions, runCondition(v1alpha1.RunConditionProgressing, metav1.ConditionFalse, "OrchestrationMode", "pipeline orchestration not yet implemented", gen))
+			s.Phase = v1alpha1.RunPhasePending
+		})
+		return ctrl.Result{}, nil
+	}
+
+	// 3d. For atomic Runs with an AgentRef, read the Agent spec (model, maxAPICalls).
+	// The controller passes these as module args to the code() function. A missing
+	// Agent is a terminal config error (like a missing Project).
+	var agentModel string
+	var agentMaxAPICalls int
+	if run.Spec.AgentRef != "" {
+		agent := &v1alpha1.Agent{}
+		if err := r.Get(ctx, types.NamespacedName{Name: run.Spec.AgentRef, Namespace: run.Namespace}, agent); err != nil {
+			if errors.IsNotFound(err) {
+				return ctrl.Result{}, r.failRun(ctx, run, "AgentNotFound",
+					fmt.Sprintf("referenced Agent %q not found", run.Spec.AgentRef))
+			}
+			return ctrl.Result{}, err
+		}
+		agentModel = agent.Spec.Model
+		agentMaxAPICalls = agent.Spec.MaxAPICalls
 	}
 
 	// 4. Resolve the singleton engine pod (a Ready one). Transiently absent (engine still rolling
@@ -148,7 +188,7 @@ func (r *RunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		logger.Error(err, "ensure agent identity", "run", req.NamespacedName)
 		return ctrl.Result{}, err
 	}
-	pod, err := r.ensureAgentPod(ctx, run, project, enginePod)
+	pod, err := r.ensureAgentPod(ctx, run, project, enginePod, agentModel, agentMaxAPICalls)
 	if err != nil {
 		logger.Error(err, "ensure agent pod", "run", req.NamespacedName)
 		return ctrl.Result{}, err
@@ -235,7 +275,7 @@ func (r *RunReconciler) ensureAgentIdentity(ctx context.Context, run *v1alpha1.R
 }
 
 // ensureAgentPod creates the agent pod if it does not yet exist and returns it.
-func (r *RunReconciler) ensureAgentPod(ctx context.Context, run *v1alpha1.Run, project *v1alpha1.Project, enginePod string) (*corev1.Pod, error) {
+func (r *RunReconciler) ensureAgentPod(ctx context.Context, run *v1alpha1.Run, project *v1alpha1.Project, enginePod string, agentModel string, agentMaxAPICalls int) (*corev1.Pod, error) {
 	podName := agentPodName(run.Name)
 	pod := &corev1.Pod{}
 	err := r.Get(ctx, types.NamespacedName{Name: podName, Namespace: run.Namespace}, pod)
@@ -245,7 +285,7 @@ func (r *RunReconciler) ensureAgentPod(ctx context.Context, run *v1alpha1.Run, p
 	if !errors.IsNotFound(err) {
 		return nil, err
 	}
-	newPod := agentPodFor(run, project, enginePod, podName)
+	newPod := agentPodFor(run, project, enginePod, podName, agentModel, agentMaxAPICalls)
 	if err := ctrl.SetControllerReference(run, newPod, r.Scheme); err != nil {
 		return nil, fmt.Errorf("set controller reference: %w", err)
 	}
@@ -260,7 +300,7 @@ func (r *RunReconciler) ensureAgentPod(ctx context.Context, run *v1alpha1.Run, p
 // runs as the per-namespace dagmar-agent SA (granted pods/exec on the engine) and uses in-cluster
 // auth for the kubectl exec the runner host performs — no kubeconfig mount (unlike the cbb8 Probe
 // client, which ran outside the cluster).
-func agentPodFor(run *v1alpha1.Run, project *v1alpha1.Project, enginePod, podName string) *corev1.Pod {
+func agentPodFor(run *v1alpha1.Run, project *v1alpha1.Project, enginePod, podName string, agentModel string, agentMaxAPICalls int) *corev1.Pod {
 	image := defaultAgentPodImage
 	if project.Spec.AgentPodImage != "" {
 		image = project.Spec.AgentPodImage
@@ -289,12 +329,21 @@ func agentPodFor(run *v1alpha1.Run, project *v1alpha1.Project, enginePod, podNam
 		// expands only when the helper runs at credential-fill time (inheriting the pod env).
 		preCall = `git config --global credential.helper '!f() { echo username=dagmar; echo password="$DAGMAR_GIT_PAT"; }; f' && `
 	}
+	// Build the module function + args. When an AgentRef is present, inject the
+	// agent's model and maxAPICalls as CLI flags to the code() function.
+	fnArgs := run.Spec.ModuleArgs
+	if agentModel != "" {
+		fnArgs = append(fnArgs, "--model", agentModel)
+		if agentMaxAPICalls > 0 {
+			fnArgs = append(fnArgs, "--max-api-calls", fmt.Sprintf("%d", agentMaxAPICalls))
+		}
+	}
 	cmd := fmt.Sprintf(
 		`apk add --no-cache %s && `+
 			preCall+
 			`curl -fsSL https://github.com/dagger/dagger/releases/download/v%s/dagger_v%s_linux_amd64.tar.gz | tar xz -C /usr/local/bin dagger && `+
 			`dagger call -m %s %s %s`,
-		apkPkgs, daggerVersion, daggerVersion, project.Spec.ModuleRef, run.Spec.ModuleFunction, shellJoin(run.Spec.ModuleArgs),
+		apkPkgs, daggerVersion, daggerVersion, project.Spec.ModuleRef, run.Spec.ModuleFunction, shellJoin(fnArgs),
 	)
 	env := []corev1.EnvVar{
 		{Name: "_EXPERIMENTAL_DAGGER_RUNNER_HOST", Value: runnerHost},

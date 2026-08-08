@@ -21,6 +21,8 @@ var scheme = runtime.NewScheme()
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(v1alpha1.AddToScheme(scheme))
+	// All CRD types are registered via AddToScheme (Agent, Prompt, QualityGate, Workflow
+	// are registered in their init() functions).
 }
 
 func main() {
