@@ -115,7 +115,7 @@ fixes. State the report is ready as input, then stop.
 
 # ── Skill entry point ──────────────────────────────────────────────────────
 
-async def run(range: str | None = None, scope: str = "session") -> object:
+async def run(range: str | None = None, scope: str = "session", _rlm=None) -> object:
     """Spawn the dagmar-review subagent.
 
     Args:
@@ -142,7 +142,9 @@ async def run(range: str | None = None, scope: str = "session") -> object:
     prompt = _PROMPT + f"\n\n## TASK\n\nReview range: {range}\nScope: {scope}\nCurrent HEAD: {sha}"
 
     # Spawn the agent — inherit parent model
-    handle = await rlm(prompt, name="dagmar-review")
+    # rlm is the Prime Agent spawn function — injected from the kernel
+    spawn = _rlm if _rlm is not None else rlm
+    handle = await spawn(prompt, name="dagmar-review")
     return handle
 
 
