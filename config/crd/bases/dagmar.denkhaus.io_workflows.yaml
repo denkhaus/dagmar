@@ -1,0 +1,79 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.21.0
+  name: workflows.dagmar.denkhaus.io
+spec:
+  group: dagmar.denkhaus.io
+  names:
+    kind: Workflow
+    listKind: WorkflowList
+    plural: workflows
+    shortNames:
+    - wf
+    singular: workflow
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          Workflow is a pipeline template: agent refs + quality gate + orchestration metadata.
+          The controller reads a Workflow to orchestrate Sub-Runs in the pipeline sequence
+          (gate → coder → review → merge). NOT a step DSL (ADR-0016 §1).
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              WorkflowSpec defines a pipeline template referencing Dagger functions + controller-
+              interpreted orchestration metadata (ADR-0016). A Workflow is NOT a step DSL — the
+              pipeline form (gate → review → merge with revise loop) is hardcoded in the controller.
+              The Workflow carries the metadata the controller needs to orchestrate Sub-Runs.
+            properties:
+              coderAgentRef:
+                description: |-
+                  CoderAgentRef names the Agent (in the Workflow's namespace) used for the coder role.
+                  The controller reads this Agent's spec to configure the code() function call.
+                type: string
+              qualityGateRef:
+                description: |-
+                  QualityGateRef names the QualityGate that gates advancement. The controller
+                  evaluates gate-green between pipeline stages.
+                type: string
+              requiresTwoGreen:
+                default: true
+                description: |-
+                  RequiresTwoGreen enforces the two-green model (ADR-0006): merge requires
+                  QualityGate.green AND ReviewAgent.approve. If false, only gate-green is needed
+                  (used for non-merge workflows like research).
+                type: boolean
+              reviewerAgentRef:
+                description: |-
+                  ReviewerAgentRef names the Agent used for the review role. Optional: if unset,
+                  the workflow runs without review (gate-only, for non-merge workflows).
+                type: string
+            required:
+            - coderAgentRef
+            - qualityGateRef
+            type: object
+        type: object
+    served: true
+    storage: true
