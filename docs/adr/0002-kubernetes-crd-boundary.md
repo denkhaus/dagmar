@@ -46,6 +46,10 @@ artifact**:
 ## Consequences
 
 - The operator is justified by six coherent custom resources.
+- **Extended by ADR-0016:** the CRD set grows to
+  `{Project, Agent, Prompt, QualityGate, Trigger, **Workflow**, Run}`. Workflow is a
+  pipeline template (definition/policy layer); the quality-gate family (ADR-0009) is the
+  first instance. See ADR-0016 for fields and the orchestration model.
 - seeds remains the single source of truth for work; the controller observes it rather
   than mirroring it.
 - Runs are observable and reconciled (`kubectl`, status, history); Sandboxes/Workspaces

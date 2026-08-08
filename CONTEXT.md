@@ -70,6 +70,8 @@ dogfooding).
 
 **CRDs (declarative: definitions / policy / registration / observable execution):**
 
+> **CRD set** (ADR-0002, extended by ADR-0016): `{Project, Agent, Prompt, QualityGate, Trigger, Workflow, Run}`.
+
 - **Project** (CRD) — a registered, repo-backed repository dagmar operates on (own
   repo or fork). Carries **dagmar-operational config only** (os-eco binding,
   credentials (the three typed classes `vcs`/`os-eco`/`llm`; ADR-0007), and the
@@ -122,13 +124,13 @@ dogfooding).
   `dagmar-gate` = *how*. Grows
   via dogfooding.
 
-**Forthcoming (referenced, not yet realized):**
-
-- **Workflow** — the container concept introduced by the Dagger-based software-factory
-  reframe (ADR-0009): a thin CRD referencing a Dagger Go function. The general framework
-  is tracked in seed `dagmar-ff60` (no ADR yet — not a decided CRD). Today the
-  quality-gate family is realized through existing CRDs (`Run` / `QualityGate` /
-  `Trigger`); "Workflow" is used as the family/container concept pending that ADR.
+- **Workflow** (CRD) — a pipeline template referencing Dagger Go functions plus
+  controller-interpreted orchestration metadata. **Not** a step DSL — the pipeline form
+  (e.g., gate → review → merge with revise loop) is hardcoded in the controller per
+  workflow type; the Workflow carries the function-independent metadata (`qualityGateRef`,
+  `agents` per role, `maxReviseRounds`, `requiresTwoGreen`). The quality-gate family
+  (ADR-0009) is the first instance. Workflow has no Status — it is a pure definition
+  (template); orchestration state lives on the orchestration Run. Decided in ADR-0016.
 
 **Roles (Agent specializations, not separate types):**
 
