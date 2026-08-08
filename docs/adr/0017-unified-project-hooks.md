@@ -89,21 +89,29 @@ express multi-step flows, coverage aggregation, conditional checks, API-verified
 whatever the Project needs. The exit-code contract (gate returns success/failure + output)
 remains; the internal structure is the Project's code.
 
-### 4. The ProjectManifest (`.dagmar/project.yaml`) is simplified
+### 4. The ProjectManifest (`.dagmar/project.yaml`) is slimmed, not removed
 
-With `checkables:` removed, the ProjectManifest (ADR-0003) carries only **metadata** if it
-carries anything at all — os-eco store paths, repo/flow metadata. It is no longer the home of
-conformance content; the Dagger module is. The manifest may persist as a thin metadata file, or
-be absorbed entirely into module function parameters. This ADR does not mandate its removal but
-removes its last load-bearing content (`checkables:`).
+With `checkables:` removed, the ProjectManifest (ADR-0003) loses its primary content but is
+**retained as a metadata file**. It carries Project metadata dagmar needs at runtime — display
+name, description, version, and future declarative configuration that does not fit as a function
+parameter. It is no longer the home of conformance logic (the Dagger module is) or the
+project-specific binding to os-eco services (the hooks are). The manifest is slimmed now; if it
+proves to carry no load-bearing content over time, it can be removed then.
 
-### 5. The `manifest` Go module loses its Checkables types
+**Prompt composition** (ADR-0005) is unaffected: dagmar operational mixins (from dagmar's own
+`.canopy/`) are composed with project-content prompts (from the project's `.canopy/`) — this
+cross-store merge is dagmar-side Go logic, not manifest-declared. The `dagmar-prompt` hook may
+wrap or extend this; the exact relationship is deferred to ADR-0018.
+
+### 5. The `manifest` Go module: Checkables types deprecated, metadata types retained
 
 The published shared library `github.com/denkhaus/dagmar/manifest` (ADR-0014 GAP-1) currently
 exports `ProjectManifest`, `Checkable`, `ParseManifest`, and `validateWorkdir`. With checkables
-moving into `dagmar-gate`, these types lose their consumer. The module is not deleted in this
-ADR (it may carry future manifest metadata types), but `Checkable`/`ParseManifest`/`validateWorkdir`
-are deprecated and will be removed when `dagmar-gate` is refactored to in-code checks.
+moving into `dagmar-gate`, `Checkable`/`validateWorkdir` are **deprecated** and will be removed
+when `dagmar-gate` is refactored to in-code checks (Phase 2). The library itself is **retained**
+— it carries the manifest metadata types (the slimmed `ProjectManifest`) that the platform and
+project modules share. The library's role narrows from "conformance contract types" to "manifest
+metadata types".
 
 ### 6. LLM-Tool hooks are hermetic in the tool-surface sense (ADR-0011)
 
