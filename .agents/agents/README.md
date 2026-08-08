@@ -1,15 +1,28 @@
 # Agent Definitions
 
-Repo-local agent definitions live as **continual-harness skills** (Python modules), not YAML
-files. The skill module contains the agent prompt (single source of truth), spawn logic, and
-task-context injection.
+Repo-local agent definitions for Prime Agent. Agents are implemented as **Python skills**
+(source in `.agents/skills/<name>/`), installed into the Prime Agent kernel-venv for
+importability.
 
 ## Current agents
 
-- **dagmar-review** — on-demand reviewer. Spawn via `await dagmar_review.run()` from IPython.
-  The Python module is installed at the kernel venv's site-packages (`dagmar_review/`).
+- **dagmar-review** — on-demand reviewer. Source: `.agents/skills/dagmar-review/dagmar_review.py`.
+  Spawn: `await dagmar_review.run()` from IPython. The module contains the full agent prompt
+  (single source of truth), range auto-detection, and rlm() spawn logic.
 
-## Spawning from Prime Agent
+## Install / Re-install
+
+After a kernel restart or fresh checkout, install the skill module:
+
+```bash
+mkdir -p ~/.prime/agent/kernel-venv/lib/python3.11/site-packages/dagmar_review
+cp .agents/skills/dagmar-review/dagmar_review.py \
+   ~/.prime/agent/kernel-venv/lib/python3.11/site-packages/dagmar_review/__init__.py
+```
+
+Then verify: `python -c "import dagmar_review; print(dagmar_review.run)"`
+
+## Spawning
 
 ```python
 # Auto-detect range (last review..HEAD):
