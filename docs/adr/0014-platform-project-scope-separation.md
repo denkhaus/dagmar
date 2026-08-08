@@ -186,6 +186,10 @@ over its bootstrap and is premature for a single project.
 
 ## Deferred
 
+> **ADR-0017 impact:** `Checkable`/`validateWorkdir` types are deprecated by ADR-0017 §5
+> (checkables move into `dagmar-gate` code). The published `manifest/` library is retained but
+> narrows to metadata types only. `ParseManifest` must be refactored to stop requiring checkables.
+
 - **Published/subpath-ref dogfood** (`-m github.com/denkhaus/dagmar/.dagmar@<ref>`) — later, once
   dagmar is published; validates the exactly-external experience + the subpath-ref mechanism.
 - **Manifest → published shared library (dagmar-a1e0)** — DONE (2026-08-07). Extracted into

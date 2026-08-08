@@ -173,6 +173,11 @@ controller sees first.
 
 ### 5. State & persistence — hybrid CRs + object-storage; os-eco as manifest-declared tool-ports (D11, D12)
 
+> **D12 partially superseded by ADR-0017:** the manifest-declared bash-command os-eco binding
+> mechanism described in this section (the five hermeticity rules, `issues_read`/`issues_write`
+> tool names, feasibility gate on the spike) is replaced by ADR-0017's named-function approach
+> (Project Hooks as Dagger module functions). D11 (state home) is unaffected.
+
 **State home (D11):** hybrid. Structured Run/Project status on the CRs (k9s-queryable,
 Kubernetes-native); large unstructured blobs (logs, outputs, traces) in object storage
 (MinIO/S3), referenced via `Status.artifactRef`. A retention policy prunes completed Runs to

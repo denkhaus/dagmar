@@ -79,7 +79,7 @@ dogfooding).
   **autonomy setting** — `merge-authority` (human|auto),
   `trigger-tier` (on-demand|reactive|proactive); ADR-0006 — and references the repo's
   Project module (`.dagmar/`, the Dagger conformance module). Project-specific content
-  (checkable logic, os-eco hook implementations) lives in the project module's code,
+  (checkable logic, Project Hook implementations) lives in the project module's code,
   not on the CR.
 - **Agent** (CRD) — a durable role/persona (coder, reviewer, researcher, …): model +
   Prompt ref + tool-set + checkable + role bounds. Materialized as Runs. Agents have
@@ -98,6 +98,12 @@ dogfooding).
 - **Trigger** (CRD) — declarative event source that creates Tasks. Reactive (GitHub
   webhooks) or proactive (cron housekeeping). Bound to a Project + Workflow
   (`spec.workflowRef`, ADR-0016 §6) + event-mapping.
+- **Project Hook** — a Dagger module function the Project exposes as a conformance entry
+  point. All Project Hooks are Go functions in the Project's `.dagmar/` Dagger module (ADR-0017).
+  Two categories: **Programmatic hooks** (`dagmar-bootstrap`/`dagmar-gate`, called by dagmar's
+  controller) and **LLM-Tool hooks** (`dagmar-issues`/`dagmar-memory`/`dagmar-prompt`, exposed as
+  tools on the agent's `Env`). Vendor-agnostic: the function name is the contract, not the backing
+  service. LLM-Tool hooks are mandatory when an LLM agent is involved (noop-allowed).
 - **Workflow** (CRD) — a pipeline template referencing Dagger Go functions plus
   controller-interpreted orchestration metadata. **Not** a step DSL — the pipeline form
   (e.g., gate → review → merge with revise loop) is hardcoded in the controller per
@@ -124,10 +130,10 @@ dogfooding).
 
 **In-repo manifest (not a CRD):**
 
-- **ProjectManifest** — the in-repo file (`.dagmar/project.yaml`) that each Project may
-  expose. **ADR-0017 supersedes the `checkables:` section** — checkable definitions now live in
-  the `dagmar-gate` Go function, not in the manifest. The manifest may persist as a thin metadata
-  file (os-eco store paths, repo/flow metadata) or be absorbed into module functions (ADR-0017 §4).
+- **ProjectManifest** — the in-repo file (`.dagmar/project.yaml`) that each Project exposes.
+  **ADR-0017 supersedes the `checkables:` section** — checkable definitions now live in the
+  `dagmar-gate` Go function, not in the manifest. The manifest is **slimmed, not removed** (ADR-0017
+  §4): it carries Project metadata (display name, description, version) dagmar needs at runtime.
   Git-native, versioned with the code; the Project CR references it by repo + path.
 
 **Roles (Agent specializations, not separate types):**
@@ -222,4 +228,4 @@ See `docs/adr/`:
 - **ADR-0014** — Platform/project scope separation (platform module vs. project conformance module)
 - **ADR-0015** — Per-Project-scoped identity (SA, RBAC, cache-vol isolation)
 - **ADR-0016** — Workflow-CRD framework (pipeline templates, dual-mode Run, controller-driven orchestration)
-- **ADR-0017** — Unified Project Hooks (everything is Dagger code; checkables move into dagmar-gate; os-eco hooks)
+- **ADR-0017** — Unified Project Hooks (everything is Dagger code; checkables move into dagmar-gate; LLM-Tool hooks)

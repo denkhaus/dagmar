@@ -111,7 +111,9 @@ moving into `dagmar-gate`, `Checkable`/`validateWorkdir` are **deprecated** and 
 when `dagmar-gate` is refactored to in-code checks (Phase 2). The library itself is **retained**
 — it carries the manifest metadata types (the slimmed `ProjectManifest`) that the platform and
 project modules share. The library's role narrows from "conformance contract types" to "manifest
-metadata types".
+metadata types". `ParseManifest` is retained but must be refactored in Phase 2 to stop requiring
+checkables (its current `len(m.Checkables) == 0` guard is coupled to the deprecated
+`Checkable`/`validateWorkdir` types).
 
 ### 6. LLM-Tool hooks are hermetic in the tool-surface sense (ADR-0011)
 
@@ -122,7 +124,7 @@ operations — read, write, edit local files. They do not *use* network within t
 Remote sync (`sd sync`, `ml sync`, `git push`) happens outside the loop, as a networked controller
 action — exactly like `dagmar-bootstrap`/`dagmar-gate` having network to install tools.
 
-Per ADR-0011 §2, "hermetic" is a **tool-surface constraint, not a network air-gap**. The os-eco
+Per ADR-0011 §2, "hermetic" is a **tool-surface constraint, not a network air-gap**. The LLM-Tool
 hooks are hermetic because they do not include network-capable tools on the agent's `Env` and do
 not invoke network operations — not because network is physically impossible (the ProbeNet
 residual from ADR-0011 applies: a raw container exec always has outbound network in Dagger
@@ -147,9 +149,9 @@ implements `dagmar-issues` differently; dagmar sees the same interface.
   (the five hermeticity rules, `issues_read`/`issues_write` tool names, feasibility gate) is
   **replaced** by ADR-0017's named-function approach. The LLM-Tool hooks are convention-named Dagger
   module functions, not manifest-declared commands wrapped into LLM tools by dagmar.
-- **ADR-0014:** the `.dagmar/` project module grows three mandatory LLM-Tool hook
-  functions (`dagmar-issues`/`dagmar-memory`/`dagmar-prompt`), mandatory when an LLM agent is
-  involved. The manifest library (manifest/) loses its primary types over time.
+- **ADR-0014:** the `.dagmar/` project module grows three LLM-Tool hook
+  functions (`dagmar-issues`/`dagmar-memory`/`dagmar-prompt`), mandatory when an LLM agent
+  operates on the Project. The manifest library (manifest/) loses its primary types over time.
 - **dagmar-gate refactoring:** the current gate.go reads `.dagmar/project.yaml` and dispatches
   checkables generically. Post-ADR, gate.go contains the checkable definitions directly as Go
   code. This is a Phase-2 implementation task (the current gate works; this ADR is the decision
@@ -169,6 +171,13 @@ how the project implements the adapter. The adapter implementation in
 port. This preserves Tier-B discipline: dagmar's domain sees only the port; the adapter bridges
 port → project hook. Backing-service CLI names (`sd`, `ml`, `cn`) appear only inside the
 project's hook implementation, never in dagmar's adapter or domain code.
+
+> **Asymmetry for `dagmar-prompt`:** `dagmar-issues` and `dagmar-memory` are thin delegations
+> (port → project hook). `dagmar-prompt` is different: ADR-0005's cross-store merge (dagmar
+> operational mixins ⊕ project prompts) is dagmar-side Go logic, not a thin delegation. Whether
+> `dagmar-prompt` **replaces** dagmar's merge, **wraps** it, or **supplements** it (a separate
+> tool the LLM calls) is deferred to ADR-0018. The bridge model above is settled for issues/memory;
+> for prompt it is open.
 
 **Signature specification.** The exact Go signatures for the LLM-Tool hooks
 (`dagmar-issues`/`dagmar-memory`/`dagmar-prompt`: inputs, outputs, error contract) are **deferred

@@ -1,4 +1,6 @@
 # dagmar-own conformance contract (ADR-0003 — the in-repo ProjectManifest).
+# NB: ADR-0017 supersedes the "manifest = what, dagmar-gate = how" model — checkables will move
+# into dagmar-gate Go code in Phase 2. Comments below are intentionally stale until then.
 #
 # Dogfooding: dagmar (itself a Project) defines its own manifest first; each capability dagmar
 # gains can extend the standard. Phase 1 (ADR-0012 §4) carries only the checkables — the
