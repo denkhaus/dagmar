@@ -38,14 +38,33 @@ type RunSpec struct {
 	// +kubebuilder:validation:Required
 	ProjectRef string `json:"projectRef"`
 
+	// AgentRef names the Agent (in the Run's namespace) whose spec configures the
+	// code() function call (model, prompt, maxAPICalls, toolSetPolicy).
+	// Required for cognition Runs; empty for raw module-call Runs (Phase 0 compat).
+	// +optional
+	AgentRef string `json:"agentRef,omitempty"`
+
 	// ModuleFunction is the dagmar module function the agent pod calls via `dagger call`
-	// (e.g. "sandbox", "probe-net"). Phase 0 uses the existing module surface; the coder-Loop
-	// function is Phase 2.
-	ModuleFunction string `json:"moduleFunction"`
+	// (e.g. "code", "sandbox", "probe-net"). Atomic mode (ADR-0016 §2): one function,
+	// one agent pod. Mutually exclusive with WorkflowRef.
+	// +optional
+	ModuleFunction string `json:"moduleFunction,omitempty"`
 
 	// ModuleArgs are the CLI args passed to the function (e.g. ["--image","alpine:3.20"]).
 	// +optional
 	ModuleArgs []string `json:"moduleArgs,omitempty"`
+
+	// WorkflowRef names the Workflow template for orchestration mode (ADR-0016 §2).
+	// When set, the controller orchestrates 1..N atomic Sub-Runs in the pipeline
+	// sequence. Mutually exclusive with ModuleFunction.
+	// +optional
+	WorkflowRef string `json:"workflowRef,omitempty"`
+
+	// ParentRun is set on Sub-Runs created by an orchestration Run (ADR-0016 §2).
+	// Names the orchestration Run that created this atomic Run. Empty on atomic
+	// Runs created directly and on orchestration Runs.
+	// +optional
+	ParentRun string `json:"parentRun,omitempty"`
 }
 
 // RunStatus holds the observed state of a Run. Phase 0 = status conditions + phase only
@@ -64,6 +83,20 @@ type RunStatus struct {
 
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
+
+	// PipelinePhase tracks orchestration Run progress (ADR-0016 §3).
+	// Values: "gate" | "coder" | "review" | "escalated" | "done".
+	// Zero-valued on atomic Runs.
+	// +optional
+	PipelinePhase string `json:"pipelinePhase,omitempty"`
+
+	// CurrentRound is the revise-round counter for orchestration Runs (ADR-0016 §3).
+	// +optional
+	CurrentRound int `json:"currentRound,omitempty"`
+
+	// SubRunRefs names the child Runs created by an orchestration Run (ADR-0016 §3).
+	// +optional
+	SubRunRefs []string `json:"subRunRefs,omitempty"`
 }
 
 // +kubebuilder:object:root=true

@@ -46,6 +46,12 @@ spec:
               reconciled execution unit (CONTEXT.md). Phase 0 carries the module-call the agent pod runs;
               the Agent reference (model/prompt/tool-set) is added in Phase 2 (cognition).
             properties:
+              agentRef:
+                description: |-
+                  AgentRef names the Agent (in the Run's namespace) whose spec configures the
+                  code() function call (model, prompt, maxAPICalls, toolSetPolicy).
+                  Required for cognition Runs; empty for raw module-call Runs (Phase 0 compat).
+                type: string
               moduleArgs:
                 description: ModuleArgs are the CLI args passed to the function (e.g.
                   ["--image","alpine:3.20"]).
@@ -55,15 +61,26 @@ spec:
               moduleFunction:
                 description: |-
                   ModuleFunction is the dagmar module function the agent pod calls via `dagger call`
-                  (e.g. "sandbox", "probe-net"). Phase 0 uses the existing module surface; the coder-Loop
-                  function is Phase 2.
+                  (e.g. "code", "sandbox", "probe-net"). Atomic mode (ADR-0016 §2): one function,
+                  one agent pod. Mutually exclusive with WorkflowRef.
+                type: string
+              parentRun:
+                description: |-
+                  ParentRun is set on Sub-Runs created by an orchestration Run (ADR-0016 §2).
+                  Names the orchestration Run that created this atomic Run. Empty on atomic
+                  Runs created directly and on orchestration Runs.
                 type: string
               projectRef:
                 description: ProjectRef names the Project (in the Run's namespace)
                   this Run executes under.
                 type: string
+              workflowRef:
+                description: |-
+                  WorkflowRef names the Workflow template for orchestration mode (ADR-0016 §2).
+                  When set, the controller orchestrates 1..N atomic Sub-Runs in the pipeline
+                  sequence. Mutually exclusive with ModuleFunction.
+                type: string
             required:
-            - moduleFunction
             - projectRef
             type: object
           status:
@@ -132,12 +149,28 @@ spec:
                   - type
                   type: object
                 type: array
+              currentRound:
+                description: CurrentRound is the revise-round counter for orchestration
+                  Runs (ADR-0016 §3).
+                type: integer
               phase:
                 description: |-
                   Phase is the high-level lifecycle phase (Pending|Running|Succeeded|Failed), DERIVED from the
                   condition set via phaseFromConditions (a read-optimized summary for k9s/back-compat; the
                   RunCondition* types are the source of truth, ADR-0013 D5).
                 type: string
+              pipelinePhase:
+                description: |-
+                  PipelinePhase tracks orchestration Run progress (ADR-0016 §3).
+                  Values: "gate" | "coder" | "review" | "escalated" | "done".
+                  Zero-valued on atomic Runs.
+                type: string
+              subRunRefs:
+                description: SubRunRefs names the child Runs created by an orchestration
+                  Run (ADR-0016 §3).
+                items:
+                  type: string
+                type: array
             type: object
         type: object
     served: true
