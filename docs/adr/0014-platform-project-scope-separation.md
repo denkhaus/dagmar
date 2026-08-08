@@ -166,6 +166,7 @@ over its bootstrap and is premature for a single project.
   **mixed-scope** — `manifest.go` (`ProjectManifest`/`Checkable`/`ParseManifest`, PROJECT conformance,
   ADR-0003) vs `config.go` (`OsEcoConfig`, PLATFORM runtime/env, ADR-0010 §8, prospective). So `config`
   does not travel wholesale: manifest parsing → `.dagmar/`, `OsEcoConfig` → stays in `.dagger/`.
+  (ADR-0018: `OsEcoConfig` and `OsEcoBinding` are removed; the config package is now a placeholder.)
   (`bootstrap.go` imports only the generated SDK + stdlib and travels clean.) The implementer of the
   deferred split must split `config` alongside the move, or hit the `internal/` wall mid-move.
   **RESOLVED (dagmar-a1e0, 2026-08-07):** the manifest's project-module home was a Dagger-forced

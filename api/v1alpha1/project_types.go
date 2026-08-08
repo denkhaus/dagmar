@@ -6,7 +6,7 @@ import (
 
 // ProjectSpec defines a registered, repo-backed repository dagmar operates on. Phase 0 carries
 // only the fields the dispatch vertical needs (ADR-0012 §2 GAP-1: agent-pod image + module ref
-// are load-bearing Phase-0 reads). The full Project spec (os-eco binding, the three typed
+// are load-bearing Phase-0 reads). The full Project spec (Project Hook binding, the three typed
 // credential classes, autonomy setting, ProjectManifest reference — CONTEXT.md) is added as the
 // control plane grows; field-home details are deferred to the control-plane-design seed.
 // GitCredentialsRef names the Secret holding the fine-grained PAT / deploy token the engine uses

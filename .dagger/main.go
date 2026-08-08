@@ -33,8 +33,9 @@ const ManifestContractVersion = manifest.Version
 
 // Dagmar is dagmar's main Dagger object (auto-named from the module). It is the primary
 // entry point into dagmar's Dagger functionality AND the per-Project binding seam: the New
-// constructor binds the target Project + os-eco configuration once, and every method
-// (Run, Sandbox, Gate, ...) reuses that bound state (ADR-0010 §5).
+// constructor binds the target Project once, and every method (Run, Sandbox, Gate, ...)
+// reuses that bound state (ADR-0010 §5). Project Hook Services (issues, memory, prompts)
+// are exposed as native Dagger functions via WithMainModule(), not Go ports (ADR-0018).
 type Dagmar struct {
 	// Project is the source directory of the target Project dagmar operates on
 	// (per-Project binding). *dagger.Directory, not *dagger.Workspace: Workspace-as-input
@@ -43,45 +44,21 @@ type Dagmar struct {
 	// source tree (the SDK itself maps Workspace -> Directory; ADR-0010 §5).
 	// +private
 	Project *dagger.Directory
-	// OsEco binds the os-eco backing services (seeds/mulch/canopy store paths) per-Project.
-	// +private
-	OsEco OsEcoBinding
 }
 
-// OsEcoBinding is the per-Project binding for the os-eco backing services (ADR-0005):
-// store paths for seeds (issues), mulch (memory), and canopy (prompts).
-type OsEcoBinding struct {
-	// Seeds is the seeds issue-store path for this Project.
-	Seeds string
-	// Mulch is the mulch expertise-store path for this Project.
-	Mulch string
-	// Canopy is the canopy prompt-store path for this Project.
-	Canopy string
-}
-
-// New is dagmar's constructor (ADR-0010 §5). Its arguments bind the per-Project context
-// (the Project source + os-eco configuration) that every method reuses. All arguments are
-// optional so the infra/spike methods (Up, DeployEngine, Probe) remain callable without a
-// Project binding — they ignore the bound state.
+// New is dagmar's constructor (ADR-0010 §5). Its argument binds the per-Project context
+// (the Project source) that every method reuses. The argument is optional so the
+// infra/spike methods (Up, DeployEngine, Probe) remain callable without a Project
+// binding — they ignore the bound state.
 //
-// The os-eco paths are passed as primitives (not an OsEcoBinding struct) because v0.21.8's
-// codegen skips a custom struct used directly as a constructor arg; OsEcoBinding remains the
-// grouped field, populated here (ADR-0010 §5).
+// Project Hook Services (issues, memory, prompts) are NOT bound here — they are native
+// Dagger functions registered via WithMainModule() (ADR-0017, ADR-0018).
 func New(
 	// The target Project's source directory (per-Project binding seam).
 	// +optional
 	project *dagger.Directory,
-	// seeds issue-store path for the Project (os-eco binding, per-Project).
-	// +optional
-	seeds string,
-	// mulch expertise-store path for the Project (os-eco binding, per-Project).
-	// +optional
-	mulch string,
-	// canopy prompt-store path for the Project (os-eco binding, per-Project).
-	// +optional
-	canopy string,
 ) *Dagmar {
-	return &Dagmar{Project: project, OsEco: OsEcoBinding{Seeds: seeds, Mulch: mulch, Canopy: canopy}}
+	return &Dagmar{Project: project}
 }
 
 // Sandbox realizes an isolated, credentialed execution slot (a Dagger Container — Tier A,

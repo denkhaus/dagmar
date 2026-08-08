@@ -17,8 +17,8 @@ import (
 const Version = "v0.1.0"
 
 // ProjectManifest is the in-repo conformance contract each Project exposes at
-// `.dagmar/project.yaml` (ADR-0003): project-specific `checkables` (+ os-eco binding +
-// repo/flow metadata, added as the control plane grows). Phase 1 carries only the checkables.
+// `.dagmar/project.yaml` (ADR-0003): project-specific metadata (+ Project Hook binding +
+// repo/flow config, added as the control plane grows). Phase 1 carries only the checkables.
 type ProjectManifest struct {
 	// Checkables are the project's mechanical self-verification steps (build/test/lint), declared
 	// per-project and required (a Project without them is non-conforming). dagmar-gate (ADR-0009 §2

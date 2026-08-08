@@ -14,17 +14,18 @@ issue, design, and code symbol uses these terms as defined here.
 ## The layered language model
 
 dagmar's ubiquitous language has three tiers. **Terms are coined only in Tier C.**
-Tier A is reused by reference; Tier B is consumed behind adapter ports.
+Tier A is reused by reference; Tier B (Project Hook Services) are Dagger functions in the
+Project module (ADR-0018: ~~consumed behind adapter ports~~ — the Go port layer is removed).
 
 | Tier | Origin | Treatment |
 |------|--------|-----------|
 | **A — Dagger** | Dagger primitives | reused by reference; names never re-coined |
-| **B — os-eco** | seeds / mulch / canopy | adapter ports; os-eco tool names appear only in adapter implementations |
+| **B — Project Hook Services** | seeds / mulch / canopy | Dagger functions in the Project module, discovered by name, verified by introspection (ADR-0018) |
 | **C — dagmar core** | dagmar's own | where we coin terms |
 
 **Rule:** never coin a Tier-C term for something Dagger already names (Tier A). If a
-concept is Dagger's, reference it; if it is an os-eco service, adapt it behind a port.
-See ADR-0001.
+concept is Dagger's, reference it; if it is a Project Hook Service, expose it as a Dagger
+function in the Project module. See ADR-0001; ADR-0018 (Tier-B redefined).
 
 ## Glossary
 
@@ -49,12 +50,12 @@ See ADR-0001.
   cognition loop. A Run drives exactly one Loop.
 - **TokenUsage** — Dagger's cost observability (`agent.TokenUsage()`).
 - **Tool** — Dagger configuration: what an agent may call (`dag.git` / `container` /
-  `http` plus os-eco adapter exposures). dagmar coins no Tool type; an Agent's
+  `http` plus Project Hook Service exposures). dagmar coins no Tool type; an Agent's
   permitted tools are its `tool-set` field. A **hermetic** agent = its `tool-set` carries no
   network-capable tool (`http`, `git` remote, the whole `container` tool) — a *tool-surface*
   constraint, **not** a network air-gap. See ADR-0011 §2.
 
-### Tier B — os-eco backing services (adapter ports, bound per-Project)
+### Tier B — Project Hook Services (Dagger functions in the Project module)
 
 All three are bound **per-Project** (N+1 contexts: dagmar-own + each target Project —
 dogfooding).
@@ -74,8 +75,8 @@ dogfooding).
 > **CRD set** (ADR-0002, extended by ADR-0016): `{Project, Agent, Prompt, QualityGate, Trigger, Workflow, Run}`.
 
 - **Project** (CRD) — a registered, repo-backed repository dagmar operates on (own
-  repo or fork). Carries **dagmar-operational config only** (os-eco binding,
-  credentials (the three typed classes `vcs`/`os-eco`/`llm`; ADR-0007), and the
+  repo or fork). Carries **dagmar-operational config only** (Project Hook binding,
+  credentials (the three typed classes `vcs`/`hook-service`/`llm`; ADR-0007), and the
   **autonomy setting** — `merge-authority` (human|auto),
   `trigger-tier` (on-demand|reactive|proactive); ADR-0006 — and references the repo's
   Project module (`.dagmar/`, the Dagger conformance module). Project-specific content
@@ -183,7 +184,7 @@ dogfooding).
   diagnose gate-gaps automatically; until then every unresolved disagreement
   escalates.
 - **Trigger flow:** Trigger → seeds issue → Task → Run(s).
-- **os-eco:** per-Project ports; N+1 contexts.
+- **Project Hook Services:** per-Project Dagger functions; N+1 contexts (ADR-0018).
 - **Two paths to seeds:** the controller observes seeds directly (scheduling/state);
   agents use the IssueTracker adapter (CRUD issues). Complementary, not redundant.
 

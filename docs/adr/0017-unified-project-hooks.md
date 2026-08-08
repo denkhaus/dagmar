@@ -24,7 +24,7 @@ parameters, and error handling. A Project that needs a checkable with aggregatio
 calls, or conditional flows cannot express it in a YAML `command:` line — it must work around
 the manifest.
 
-The spike `dagmar-e8f3` asked whether os-eco tool-wrapping (sd/ml/cn) should be data-driven
+The spike `dagmar-e8f3` asked whether Project Hook Service tool-wrapping (sd/ml/cn) should be data-driven
 (manifest-declared bash commands) or code (module functions). The answer surfaced the deeper
 question: why have two mechanisms at all?
 
@@ -95,7 +95,7 @@ With `checkables:` removed, the ProjectManifest (ADR-0003) loses its primary con
 **retained as a metadata file**. It carries Project metadata dagmar needs at runtime — display
 name, description, version, and future declarative configuration that does not fit as a function
 parameter. It is no longer the home of conformance logic (the Dagger module is) or the
-project-specific binding to os-eco services (the hooks are). The manifest is slimmed now; if it
+project-specific binding to Project Hook Services (the hooks are). The manifest is slimmed now; if it
 proves to carry no load-bearing content over time, it can be removed then.
 
 **Prompt composition** (ADR-0005) is unaffected: dagmar operational mixins (from dagmar's own
@@ -145,7 +145,7 @@ implements `dagmar-issues` differently; dagmar sees the same interface.
   how." The gate function owns both the checkable definitions and their execution.
 - **ADR-0012 §4:** the gate-family remains always-Dagger functions; the change is that gate logic
   is fully in code, not split between YAML (checkables) and code (dispatch).
-- **ADR-0013 §5 D12:** the manifest-declared bash-command os-eco binding mechanism
+- **ADR-0013 §5 D12:** the manifest-declared bash-command Project Hook Service binding mechanism
   (the five hermeticity rules, `issues_read`/`issues_write` tool names, feasibility gate) is
   **replaced** by ADR-0017's named-function approach. The LLM-Tool hooks are convention-named Dagger
   module functions, not manifest-declared commands wrapped into LLM tools by dagmar.
@@ -167,7 +167,7 @@ The Tier-B adapter ports (`IssueTracker`, `Memory`, `Prompts` in `.dagger/intern
 dagmar's **internal** domain interfaces — they define what dagmar's domain code calls. The project
 hooks (`dagmar-issues`/`dagmar-memory`/`dagmar-prompt`) are the **external** conformance surface —
 how the project implements the adapter. The adapter implementation in
-`.dagger/internal/adapters/oseco/` will call the project's hooks by module-ref, satisfying the
+the platform will call the project's hooks by module-ref, satisfying the
 port. This preserves Tier-B discipline: dagmar's domain sees only the port; the adapter bridges
 port → project hook. Backing-service CLI names (`sd`, `ml`, `cn`) appear only inside the
 project's hook implementation, never in dagmar's adapter or domain code.
@@ -191,8 +191,8 @@ functions, two caller categories) and the hook-vs-port relationship; ADR-0018 fi
   than three well-defined Go functions, for less type safety and no LLM-tool-quality advantage.
 - **Keep two mechanisms (manifest hooks + module hooks).** Rejected — the split is unjustified,
   hard to explain, and limits Projects to bash commands for checkables. One mechanism is simpler.
-- **MCP server for os-eco tools.** Rejected — adds a runtime dependency, bypasses Dagger's native
+- **MCP server for Project Hook Service tools.** Rejected — adds a runtime dependency, bypasses Dagger's native
   module function tool registration, and provides no benefit over convention-called functions.
-- **Go-Wrapper per os-eco command (hardcoded in dagmar).** Rejected — violates Tier-B discipline
+- **Go-Wrapper per Project Hook Service command (hardcoded in dagmar).** Rejected — violates Tier-B discipline
   (ADR-0001): dagmar would know `sd`/`ml`/`cn` names. The hooks are Project-scope; dagmar calls
   the abstraction.

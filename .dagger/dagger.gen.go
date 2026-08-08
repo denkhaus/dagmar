@@ -62,24 +62,20 @@ func convertSlice[I any, O any](in []I, f func(I) O) []O {
 func (r Dagmar) MarshalJSON() ([]byte, error) {
 	var concrete struct {
 		Project *dagger.Directory
-		OsEco   OsEcoBinding
 	}
 	concrete.Project = r.Project
-	concrete.OsEco = r.OsEco
 	return json.Marshal(&concrete)
 }
 
 func (r *Dagmar) UnmarshalJSON(bs []byte) error {
 	var concrete struct {
 		Project *dagger.Directory
-		OsEco   OsEcoBinding
 	}
 	err := json.Unmarshal(bs, &concrete)
 	if err != nil {
 		return err
 	}
 	r.Project = concrete.Project
-	r.OsEco = concrete.OsEco
 	return nil
 }
 
@@ -313,28 +309,7 @@ func invoke(ctx context.Context, parentJSON []byte, parentName string, fnName st
 					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg project", err))
 				}
 			}
-			var seeds string
-			if inputArgs["seeds"] != nil {
-				err = json.Unmarshal([]byte(inputArgs["seeds"]), &seeds)
-				if err != nil {
-					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg seeds", err))
-				}
-			}
-			var mulch string
-			if inputArgs["mulch"] != nil {
-				err = json.Unmarshal([]byte(inputArgs["mulch"]), &mulch)
-				if err != nil {
-					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg mulch", err))
-				}
-			}
-			var canopy string
-			if inputArgs["canopy"] != nil {
-				err = json.Unmarshal([]byte(inputArgs["canopy"]), &canopy)
-				if err != nil {
-					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg canopy", err))
-				}
-			}
-			return New(project, seeds, mulch, canopy), nil
+			return New(project), nil
 		default:
 			return nil, fmt.Errorf("unknown function %s", fnName)
 		}

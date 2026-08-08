@@ -9,7 +9,7 @@
 
 dagmar targets autonomy on forks, so secret handling is security-critical. The domain
 model already leans on credentials — `CONTEXT.md` gives `Project` a "credentials" slot,
-calls the `Sandbox` "credentialed", and binds the Tier B os-eco services (IssueTracker /
+calls the `Sandbox` "credentialed", and binds the Tier B Project Hook Services (issues /
 Memory / Prompts) per-Project — but **storage**, **per-Project scoping**, and
 **injection** into the `Sandbox` / `dag.Env()` were undecided (foundations review **C2**).
 This ADR closes that gap. It does not reopen any prior decision; it composes with:
@@ -45,8 +45,9 @@ gets its own namespace like any target Project.
 
 - **`vcs`** — VCS/git credentials (clone + push) for the Project's repo or fork; consumed
   by `Workspace` clone and PR push.
-- **`os-eco`** — per-Project Tier B tokens (IssueTracker → seeds, Memory → mulch,
-  Prompts → canopy); one os-eco binding per Project (N+1, including dagmar-own).
+- **`hook-service`** (was `os-eco`, renamed ADR-0018) — per-Project Tier B tokens for the
+  Project Hook Services (issues → seeds, memory → mulch,
+  prompts → canopy); one binding per Project (N+1, including dagmar-own).
 - **`llm`** — LLM provider key(s) for `dag.LLM()`.
 
 Typing (rather than one blob) makes least-privilege projection and audit trivial: each
@@ -73,7 +74,7 @@ The controller projects **only the class(es) a given `Run` needs** into the `San
 (env vars / projected `Secret`):
 
 - a read-only review `Run` receives `vcs` read but **no push token**;
-- `os-eco` tokens are projected scoped to the Project's binding;
+- `hook-service` tokens are projected scoped to the Project's binding;
 - the `llm` key is projected only when the Agent's role invokes `dag.LLM()`.
 
 The `Sandbox` pod sets `_EXPERIMENTAL_DAGGER_RUNNER_HOST=kube-pod://` (ADR-0004) and
@@ -109,7 +110,8 @@ Two invariants carry over from prior decisions:
 
 - **Glossary:** `Project` "credentials" = the three typed classes (ADR-0007); `Sandbox`
   "credentialed" = the per-`Run` projected subset actually mounted into that `Sandbox`;
-  Tier B os-eco bindings resolve their tokens from the Project's `os-eco` secret.
+  Tier B Project Hook Service bindings resolve their tokens from the Project's `hook-service` secret
+  (was `os-eco`, renamed ADR-0018).
 - **ADR-0004 inherits:** the per-Project namespace topology and the `Sandbox`
   env-projection model are now fixed inputs to engine-tenancy / concurrency work
   (seed `dagmar-cbb8`).

@@ -1,7 +1,7 @@
 // Package app contains dagmar's application services: orchestration that wires the Dagger
-// SDK (Tier A, used DIRECTLY — ADR-0001; ADR-0010 §3) to the pure domain core and the
-// os-eco ports. app is the boundary the main Dagger object (Dagmar) delegates to.
-// Dagger-direct logic here is integration-tested via a real engine (//go:build integration).
+// SDK (Tier A, used DIRECTLY — ADR-0001; ADR-0010 §3) to the pure domain core. app is the
+// boundary the main Dagger object (Dagmar) delegates to. Dagger-direct logic here is
+// integration-tested via a real engine (//go:build integration).
 package app
 
 import (

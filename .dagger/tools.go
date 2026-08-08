@@ -7,5 +7,5 @@
 package tools
 
 import (
-	_ "go.uber.org/mock/mockgen" // generates the os-eco port mocks (ports/generate.go)
+	_ "go.uber.org/mock/mockgen" // generates the Tracer port mock (ports/generate.go)
 )
