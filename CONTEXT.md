@@ -225,3 +225,4 @@ See `docs/adr/`:
 - **ADR-0014** — Platform/project scope separation (platform module vs. project conformance module)
 - **ADR-0015** — Per-Project-scoped identity (SA, RBAC, cache-vol isolation)
 - **ADR-0016** — Workflow-CRD framework (pipeline templates, dual-mode Run, controller-driven orchestration)
+- **ADR-0017** — Unified Project Hooks (everything is Dagger code; checkables move into dagmar-gate; os-eco hooks)
