@@ -100,8 +100,10 @@ proves to carry no load-bearing content over time, it can be removed then.
 
 **Prompt composition** (ADR-0005) is unaffected: dagmar operational mixins (from dagmar's own
 `.canopy/`) are composed with project-content prompts (from the project's `.canopy/`) — this
-cross-store merge is dagmar-side Go logic, not manifest-declared. The `dagmar-prompt` hook may
-wrap or extend this; the exact relationship is deferred to ADR-0018.
+cross-store merge is dagmar-side Go logic, not manifest-declared. ~~The `dagmar-prompt` hook may
+wrap or extend this; the exact relationship is deferred to ADR-0018.~~ — **ADR-0019 resolved:**
+`dagmar-prompt` supplements (not replaces/wraps) the merge; it is a runtime LLM tool for on-demand
+project prompt rendering, while the merge remains the controller's initial-prompt composer.
 
 ### 5. The `manifest` Go module: Checkables types deprecated, metadata types retained
 
@@ -172,17 +174,16 @@ port. This preserves Tier-B discipline: dagmar's domain sees only the port; the 
 port → project hook. Backing-service CLI names (`sd`, `ml`, `cn`) appear only inside the
 project's hook implementation, never in dagmar's adapter or domain code.
 
-> **Asymmetry for `dagmar-prompt`:** `dagmar-issues` and `dagmar-memory` are thin delegations
-> (port → project hook). `dagmar-prompt` is different: ADR-0005's cross-store merge (dagmar
-> operational mixins ⊕ project prompts) is dagmar-side Go logic, not a thin delegation. Whether
-> `dagmar-prompt` **replaces** dagmar's merge, **wraps** it, or **supplements** it (a separate
-> tool the LLM calls) is deferred to ADR-0018. The bridge model above is settled for issues/memory;
-> for prompt it is open.
+> **Asymmetry for `dagmar-prompt`** (resolved by ADR-0019): `dagmar-issues` and
+> `dagmar-memory` are thin delegations (port → project hook). `dagmar-prompt` **supplements**
+> ADR-0005's cross-store merge — it is a separate runtime tool the LLM calls to render additional
+> project prompt content; the merge remains dagmar-side controller logic (pre-loop). The bridge
+> model is settled for all three hooks.
 
-**Signature specification.** The exact Go signatures for the LLM-Tool hooks
+**Signature specification.** ~~The exact Go signatures for the LLM-Tool hooks
 (`dagmar-issues`/`dagmar-memory`/`dagmar-prompt`: inputs, outputs, error contract) are **deferred
-to ADR-0018** (Project Hook contract). ADR-0017 decides the pattern (named Dagger module
-functions, two caller categories) and the hook-vs-port relationship; ADR-0018 fixes the types.
+to ADR-0018** (Project Hook contract).~~ — **Resolved by ADR-0019**: all five hook signatures are
+specified, and the `dagmar-prompt` asymmetry is resolved (supplements the ADR-0005 merge).
 
 ## Alternatives considered
 

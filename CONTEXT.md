@@ -102,9 +102,12 @@ dogfooding).
 - **Project Hook** — a Dagger module function the Project exposes as a conformance entry
   point. All Project Hooks are Go functions in the Project's `.dagmar/` Dagger module (ADR-0017).
   Two categories: **Programmatic hooks** (`dagmar-bootstrap`/`dagmar-gate`, called by dagmar's
-  controller) and **LLM-Tool hooks** (`dagmar-issues`/`dagmar-memory`/`dagmar-prompt`, exposed as
-  tools on the agent's `Env`). Vendor-agnostic: the function name is the contract, not the backing
-  service. LLM-Tool hooks are mandatory when an LLM agent is involved (noop-allowed).
+  controller, take `source *dagger.Directory` + `githubToken *dagger.Secret`) and **LLM-Tool hooks**
+  (`dagmar-issues`/`dagmar-memory`/`dagmar-prompt`, exposed as tools on the agent's `Env`, take
+  only operation-specific params — workspace accessed implicitly via `dag.CurrentModule()`).
+  Signatures + conformance check specified in ADR-0019. Vendor-agnostic: the function name is the
+  contract, not the backing service. LLM-Tool hooks are mandatory when an LLM agent is involved
+  (noop-allowed). `dagmar-prompt` supplements (not replaces) ADR-0005's cross-store merge.
 - **Workflow** (CRD) — a pipeline template referencing Dagger Go functions plus
   controller-interpreted orchestration metadata. **Not** a step DSL — the pipeline form
   (e.g., gate → review → merge with revise loop) is hardcoded in the controller per
@@ -230,3 +233,5 @@ See `docs/adr/`:
 - **ADR-0015** — Per-Project-scoped identity (SA, RBAC, cache-vol isolation)
 - **ADR-0016** — Workflow-CRD framework (pipeline templates, dual-mode Run, controller-driven orchestration)
 - **ADR-0017** — Unified Project Hooks (everything is Dagger code; checkables move into dagmar-gate; LLM-Tool hooks)
+- **ADR-0018** — Go port/adapter layer removed; Project Hook Services are Dagger functions; Tracer/Span sole surviving port
+- **ADR-0019** — Project Hook function signatures + introspection conformance; dagmar-prompt supplements (not replaces) ADR-0005 merge
