@@ -72,6 +72,13 @@ premature full-Kubebuilder heaviness. Matches the "build up step by step" trajec
 
 ### 4. First earned capability = dagmar's own CI, as always-Dagger wrapper functions
 
+> **Partially superseded by ADR-0017:** the "manifest = what, `dagmar-gate` = how" model and
+> review-11 GAP-3's rejection of "`dagmar-gate` IS the checkable" are reversed — with the manifest
+> `checkables:` section removed, there is no second source, so the gate function owns both
+> definition and execution. The always-Dagger gate-family functions (`dagmar-bootstrap`/
+> `dagmar-gate`) remain; what changes is that `dagmar-gate` contains the checkable logic directly,
+> not a generic dispatch over manifest-parsed YAML.
+
 After the dispatch vertical, dagmar earns its **own CI** — the deterministic safety net. The
 gate-family from ADR-0009 §2 is implemented as **Dagger functions**, in the Project's Dagger-SDK
 language:

@@ -71,7 +71,8 @@ more. (The `merge` tool is in **no** Agent's tool-set, ADR-0006.)
 > tool is the **raw `container`** tool. A **named Dagger function** the agent calls in-loop —
 > e.g. the checkable wrapper `dagmar-gate`, which internally container-execs build/test/lint —
 > is NOT the raw `container` tool and is therefore NOT withheld. Its container-exec network
-> residual is the §3-accepted residual; the gate body is project-declared (manifest, ADR-0003)
+> residual is the §3-accepted residual; the gate body is project-declared (ADR-0017: in-code
+> `dagmar-gate` Go logic, formerly manifest-declared per ADR-0003)
 > and gate-reviewed, and the in-loop run uses a pinned ref, so an injected agent cannot redirect
 > it to arbitrary code. Hermetic coders therefore DO run `dagmar-gate` in-loop (self-verification
 > preserved, CONTEXT.md).

@@ -30,6 +30,12 @@ seeds/ADRs (the latter sharpens ADR-0007).
 
 ### 2. Gate composition = deterministic, via project-conformance entry points
 
+> **Partially superseded by ADR-0017:** the "manifest = what, `dagmar-gate` = how" split is
+> replaced by "`dagmar-gate` = what AND how" — checkable definitions move from the manifest into
+> the gate function's Go code. The `dagmar-bootstrap`/`dagmar-gate` conformance functions remain
+> the entry points; what changes is that `dagmar-gate` now owns the checkable definitions too, not
+> just their execution dispatch.
+
 - The QualityGate is **purely deterministic**. No AI-review inside the gate — that is the
   ReviewAgent's job. "Gate green" = all checkables + rules pass deterministically.
 - The project exposes standardized entry points — concretely **Dagger functions**

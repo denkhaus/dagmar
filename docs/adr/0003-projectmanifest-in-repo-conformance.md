@@ -1,8 +1,10 @@
 # ADR-0003: Project conformance via in-repo ProjectManifest
 
-- **Status:** decided
+- **Status:** partially superseded by ADR-0017 §3 (checkables move into dagmar-gate)
 - **Date:** 2026-07-31
 - **Resolved in:** seeds dagmar-4271
+- **Superseded:** the `checkables:` manifest section is replaced by in-code gate logic (ADR-0017 §3).
+  The ProjectManifest concept itself may persist as a thin metadata file (ADR-0017 §4).
 
 ## Context
 

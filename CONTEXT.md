@@ -40,10 +40,11 @@ See ADR-0001.
 - **Env** — Dagger environment bundling inputs/outputs/tools for an LLM (`dag.Env()`).
 - **CodeWorkspace** — `CodeWorkspace(source, checkable)`; the Tier-A projection of a
   dagmar Workspace.
-- **checkable** — the project's mechanical self-verification (build/test/lint), declared
-  per-project in the ProjectManifest (`checkables:`, ADR-0003) and run by the always-Dagger
-  wrapper function `dagmar-gate` (ADR-0009 §2 / ADR-0012 §4). Reused both in-loop (agent
-  self-verifies while working) and as the mechanical layer of the QualityGate.
+- **checkable** — the project's mechanical self-verification (build/test/lint), defined
+  per-project **in code** inside the `dagmar-gate` Dagger function (ADR-0017 §3; formerly
+  manifest-declared per ADR-0003, superseded). Also a Tier-A Dagger concept: the
+  `CodeWorkspace(source, checkable)` parameter. Reused both in-loop (agent self-verifies while
+  working) and as the mechanical layer of the QualityGate.
 - **Loop** — `dag.LLM().WithEnv(env).WithPromptFile(prompt).Loop()`; the agent
   cognition loop. A Run drives exactly one Loop.
 - **TokenUsage** — Dagger's cost observability (`agent.TokenUsage()`).
@@ -77,8 +78,9 @@ dogfooding).
   credentials (the three typed classes `vcs`/`os-eco`/`llm`; ADR-0007), and the
   **autonomy setting** — `merge-authority` (human|auto),
   `trigger-tier` (on-demand|reactive|proactive); ADR-0006 — and references the repo's
-  ProjectManifest.
-  Project-specific content (incl. `checkables`) lives in the manifest, not on the CR.
+  Project module (`.dagmar/`, the Dagger conformance module). Project-specific content
+  (checkable logic, os-eco hook implementations) lives in the project module's code,
+  not on the CR.
 - **Agent** (CRD) — a durable role/persona (coder, reviewer, researcher, …): model +
   Prompt ref + tool-set + checkable + role bounds. Materialized as Runs. Agents have
   **no merge authority** — merge is a deterministic controller function (ADR-0006); the
@@ -122,16 +124,11 @@ dogfooding).
 
 **In-repo manifest (not a CRD):**
 
-- **ProjectManifest** — the in-repo conformance contract each Project exposes:
-  project-specific `checkables` + os-eco binding (seeds/mulch/**canopy** store paths) +
-  repo/flow metadata. Prompts are NOT declared here — they live in the project's own
-  `.canopy/` store (see ADR-0005). Git-native, versioned with the code; the Project CR
-  references it by repo + path. Path/format: `.dagmar/project.yaml` (YAML); the CR has
-  no `checkable-source` field — checkables live in the manifest (ADR-0003). The manifest
-  declares **what** the checkables are; the Dagger function `dagmar-gate` (ADR-0009 §2 /
-  ADR-0012 §4) is the **execution wrapper** that runs them — manifest = *what*,
-  `dagmar-gate` = *how*. Grows
-  via dogfooding.
+- **ProjectManifest** — the in-repo file (`.dagmar/project.yaml`) that each Project may
+  expose. **ADR-0017 supersedes the `checkables:` section** — checkable definitions now live in
+  the `dagmar-gate` Go function, not in the manifest. The manifest may persist as a thin metadata
+  file (os-eco store paths, repo/flow metadata) or be absorbed into module functions (ADR-0017 §4).
+  Git-native, versioned with the code; the Project CR references it by repo + path.
 
 **Roles (Agent specializations, not separate types):**
 
