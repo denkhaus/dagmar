@@ -84,6 +84,52 @@ func (m *Dagmar) Sandbox(
 	return &Sandbox{ctr: ctr}, nil
 }
 
+// Code is dagmar's coder-loop entry point (Phase 2 cognition, ADR-0021 D1). It constructs
+// the Env, drives the LLM Loop, and returns the modified workspace Directory. The controller
+// dispatches this via `dagger call -m .dagger code --source <dir> --prompt-file <md>`.
+// Delegates to app.Code.
+//
+// The args are primitives + Dagger types (Directory, File) because Dagger codegen requires
+// main-package types only. The app layer builds the Env + LLM + Loop from these (ADR-0010 §3:
+// Tier A direct). The prompt file is pre-composed by the controller (ADR-0005 merge).
+func (m *Dagmar) Code(
+	ctx context.Context,
+	// source is the workspace Directory — the project source the agent works on
+	// (clone from ADR-0020 D1: dag.Git(repoURL).Branch(branchName).Tree()).
+	source *dagger.Directory,
+	// promptFile is the resolved prompt .md (ADR-0005 cross-store merge, pre-computed
+	// by the controller). The agent receives this via WithPromptFile.
+	promptFile *dagger.File,
+	// model is the LLM model identifier (e.g. "anthropic/claude-sonnet-4").
+	// +optional
+	// +default="anthropic/claude-sonnet-4"
+	model string,
+	// maxAPICalls bounds the LLM API calls for this Run (token/cost cap, ADR-0021 D4).
+	// Engine-enforced hard stop: when exhausted, the Loop terminates.
+	// +optional
+	// +default=100
+	maxAPICalls int,
+) (*dagger.Directory, error) {
+	src := source
+	if src == nil {
+		src = m.Project
+	}
+	return app.Code(ctx, src, promptFile, model, maxAPICalls)
+}
+
+// Diff computes the difference between a pre-Loop and post-Loop workspace (ADR-0021 D8).
+// The controller calls this after Code() to extract the agent's changes for the PR flow
+// (ADR-0020 D3). Returns a Directory containing only the changed files.
+func (m *Dagmar) Diff(
+	ctx context.Context,
+	// after is the post-Loop workspace (Code's return value).
+	after *dagger.Directory,
+	// before is the pre-Loop workspace (the original clone).
+	before *dagger.Directory,
+) *dagger.Directory {
+	return app.Diff(after, before)
+}
+
 // Sandbox is the Dagger object returned by Dagmar.Sandbox — a thin, chainable wrapper over
 // the realized Container. Exported methods on it become callable Dagger functions.
 type Sandbox struct {

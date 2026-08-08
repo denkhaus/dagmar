@@ -212,6 +212,41 @@ func invoke(ctx context.Context, parentJSON []byte, parentName string, fnName st
 	switch parentName {
 	case "Dagmar":
 		switch fnName {
+		case "Code":
+			var parent Dagmar
+			err = json.Unmarshal(parentJSON, &parent)
+			if err != nil {
+				panic(fmt.Errorf("%s: %w", "failed to unmarshal parent object", err))
+			}
+			var source *dagger.Directory
+			if inputArgs["source"] != nil {
+				err = json.Unmarshal([]byte(inputArgs["source"]), &source)
+				if err != nil {
+					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg source", err))
+				}
+			}
+			var promptFile *dagger.File
+			if inputArgs["promptFile"] != nil {
+				err = json.Unmarshal([]byte(inputArgs["promptFile"]), &promptFile)
+				if err != nil {
+					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg promptFile", err))
+				}
+			}
+			var model string
+			if inputArgs["model"] != nil {
+				err = json.Unmarshal([]byte(inputArgs["model"]), &model)
+				if err != nil {
+					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg model", err))
+				}
+			}
+			var maxApicalls int
+			if inputArgs["maxAPICalls"] != nil {
+				err = json.Unmarshal([]byte(inputArgs["maxAPICalls"]), &maxApicalls)
+				if err != nil {
+					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg maxAPICalls", err))
+				}
+			}
+			return (*Dagmar).Code(&parent, ctx, source, promptFile, model, maxApicalls)
 		case "DeployEngine":
 			var parent Dagmar
 			err = json.Unmarshal(parentJSON, &parent)
@@ -226,6 +261,27 @@ func invoke(ctx context.Context, parentJSON []byte, parentName string, fnName st
 				}
 			}
 			return (*Dagmar).DeployEngine(&parent, ctx, cluster)
+		case "Diff":
+			var parent Dagmar
+			err = json.Unmarshal(parentJSON, &parent)
+			if err != nil {
+				panic(fmt.Errorf("%s: %w", "failed to unmarshal parent object", err))
+			}
+			var after *dagger.Directory
+			if inputArgs["after"] != nil {
+				err = json.Unmarshal([]byte(inputArgs["after"]), &after)
+				if err != nil {
+					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg after", err))
+				}
+			}
+			var before *dagger.Directory
+			if inputArgs["before"] != nil {
+				err = json.Unmarshal([]byte(inputArgs["before"]), &before)
+				if err != nil {
+					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg before", err))
+				}
+			}
+			return (*Dagmar).Diff(&parent, ctx, after, before), nil
 		case "Probe":
 			var parent Dagmar
 			err = json.Unmarshal(parentJSON, &parent)
