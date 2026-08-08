@@ -3,7 +3,7 @@
 - **Status:** decided
 - **Date:** 2026-08-08
 - **Resolved in:** seed dagmar-ff60
-- **Evidence:** grilling session 2026-08-08 (seed `dagmar-ff60`); builds on ADR-0009 (quality-gate workflow family), ADR-0002 (CRD boundary), ADR-0006 (autonomy model / two-green), ADR-0013 (control-plane design).
+- **Evidence:** grilling session 2026-08-08 (seed `dagmar-ff60`); builds on ADR-0009 (quality-gate workflow family), ADR-0002 (CRD boundary), ADR-0006 (autonomy model / two-green), ADR-0012 (self-bootstrap trajectory / phase model), ADR-0013 (control-plane design).
 
 ## Context
 
@@ -54,6 +54,10 @@ type RunSpec struct {
     // Orchestration mode (new): references a Workflow template.
     // Mutually exclusive with ModuleFunction.
     WorkflowRef    string   `json:"workflowRef,omitempty"`
+    // Sub-Runs only: the orchestration Run that created this atomic Run.
+    // Empty on atomic Runs created directly and on orchestration Runs.
+    // +optional
+    ParentRun      string   `json:"parentRun,omitempty"`
 }
 ```
 
@@ -78,7 +82,10 @@ type RunStatus struct {
     AgentPodName string           `json:"agentPodName,omitempty"`
     Conditions  []metav1.Condition `json:"conditions,omitempty"`
     // New (orchestration Runs only):
-    PipelinePhase  string   `json:"pipelinePhase,omitempty"`   // "gate" | "coder" | "review" | "calibration" | "done"
+    PipelinePhase  string   `json:"pipelinePhase,omitempty"`   // "gate" | "coder" | "review" | "calibration" | "escalated" | "done"
+    // "calibration" is reached only when the Calibration Agent exists (ADR-0006, deferred).
+    // "escalated" is the terminal state when maxReviseRounds is exhausted (human handoff).
+    // "done" = Two-Green reached and merge completed.
     CurrentRound   int      `json:"currentRound,omitempty"`    // revise-round counter
     SubRunRefs     []string `json:"subRunRefs,omitempty"`      // names of child Runs
 }
@@ -113,9 +120,11 @@ orchestration, not a Sub-Run.
 
 ### 6. Trigger → Workflow binding: `Trigger.spec.workflowRef`
 
-A Trigger references a Workflow by name. When the event fires, the controller creates an
-orchestration Run (`spec.workflowRef` set). The event-filter logic (which events fire the
-trigger) stays on the Trigger — it is an event condition, not a pipeline property.
+A Trigger references a Workflow by name. When the event fires, the controller creates a Task
+(seeds issue, ADR-0013 §3) and an orchestration Run (`spec.workflowRef` set) under that Task.
+The orchestration Run's Sub-Runs inherit the `taskRef` for lineage tracking. The event-filter
+logic (which events fire the trigger) stays on the Trigger — it is an event condition, not a
+pipeline property. Full Trigger semantics (webhook/cron/manual) are Phase 3.
 
 ```yaml
 # Example (Phase 3 — Trigger not yet implemented):
@@ -136,7 +145,7 @@ the definition/policy layer alongside Agent, Prompt, and QualityGate.
 
 ### 8. QualityGate stays a standalone CRD
 
-The QualityGate CRD defines *what* the gate checks (checkables, rules, thresholds) — deklarative
+The QualityGate CRD defines *what* the gate checks (checkables, rules, thresholds) — **declarative**
 policy. The Workflow references it (`spec.qualityGateRef`). The separation is:
 
 - **QualityGate** = what is checked (policy)

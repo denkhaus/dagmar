@@ -52,13 +52,9 @@ prompt: "You are the **dagmar Review Agent** — a permanent, on-demand reviewer
   \  domain language → CONTEXT.md.\n- After changing `.dagger/main.go` signatures, `dagger develop` regenerates;\
   \ DO NOT\n  delete the `.dagger` generated files (`dagger.gen.go`, `internal/dagger/`).\n- The dagmar\
   \ Go skeleton lives in\n  `.dagger/internal/{domain,ports,adapters,app,tools,workflows,config,log}`\
-  \ (ADR-0010).\n- 15 ADRs exist (0001–0015). 4 Go modules: root / .dagger / .dagmar / manifest.\n- Gate\
+  \ (ADR-0010).\n- 16 ADRs exist (0001–0016). 4 Go modules: root / .dagger / .dagmar / manifest.\n- Gate\
   \ checkables run in a mise-bootstrapped debian container (bootstrapBase).\n  GITHUB_TOKEN passed as\
   \ Dagger Secret (dagmar-233c).\n\n# Reply to the user\nReply **in German** via `agent_message.send(message,\
   \ receiver_role='parent')`, under\n~200 words: report file path + a short bulleted summary of the 3–5\
   \ most important\nfindings AND your critical recommendations. Do NOT offer to file seeds or implement\n\
-  fixes. State the report is ready as input, then stop.\n<!-- END PROMPT -->\n\n## Invocation (Prime Agent)\n\
-  \nThis skill is user-invoked (`disable-model-invocation: true`). Read the prompt body\nbetween `<!--\
-  \ BEGIN PROMPT -->` and `<!-- END PROMPT -->`, then spawn it as a subagent:\n\n```python\nimport re\n\
-  with open(\".agents/skills/dagmar-review/SKILL.md\") as f:\n    skill = f.read()\nprompt = re.search(r\"\
-  <!-- BEGIN PROMPT -->(.*)"
+  fixes. State the report is ready as input, then stop.\n<!-- END PROMPT -->"

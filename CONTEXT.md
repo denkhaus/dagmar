@@ -94,9 +94,18 @@ dogfooding).
   ReviewAgent holds a hard veto. Per-Project; codebase-evolving (grows via the
   Calibration Agent).
 - **Trigger** (CRD) — declarative event source that creates Tasks. Reactive (GitHub
-  webhooks) or proactive (cron housekeeping). Bound to a Project + Agent /
-  event-mapping.
-- **Run** (CRD) — one execution of an Agent, in one Sandbox, on one Workspace. The
+  webhooks) or proactive (cron housekeeping). Bound to a Project + Workflow
+  (`spec.workflowRef`, ADR-0016 §6) + event-mapping.
+- **Workflow** (CRD) — a pipeline template referencing Dagger Go functions plus
+  controller-interpreted orchestration metadata. **Not** a step DSL — the pipeline form
+  (e.g., gate → review → merge with revise loop) is hardcoded in the controller per
+  workflow type; the Workflow carries the function-independent metadata (`qualityGateRef`,
+  `agents` per role, `maxReviseRounds`, `requiresTwoGreen`). The quality-gate family
+  (ADR-0009) is the first instance. Workflow has no Status — it is a pure definition
+  (template); orchestration state lives on the orchestration Run. Decided in ADR-0016.
+- **Run** (CRD) — one execution: either **atomic** (one Agent, one Sandbox, one Workspace —
+  one Dagger function call) or **orchestration** (supervises N atomic Sub-Runs per a Workflow
+  template; no Agent/Sandbox/Workspace of its own). Dual-mode decided in ADR-0016 §2. The
   observable, reconciled execution unit; carries status, token usage, outcome.
 
 **Non-CR entities (canonical elsewhere or runtime artifacts):**
@@ -124,14 +133,6 @@ dogfooding).
   `dagmar-gate` = *how*. Grows
   via dogfooding.
 
-- **Workflow** (CRD) — a pipeline template referencing Dagger Go functions plus
-  controller-interpreted orchestration metadata. **Not** a step DSL — the pipeline form
-  (e.g., gate → review → merge with revise loop) is hardcoded in the controller per
-  workflow type; the Workflow carries the function-independent metadata (`qualityGateRef`,
-  `agents` per role, `maxReviseRounds`, `requiresTwoGreen`). The quality-gate family
-  (ADR-0009) is the first instance. Workflow has no Status — it is a pure definition
-  (template); orchestration state lives on the orchestration Run. Decided in ADR-0016.
-
 **Roles (Agent specializations, not separate types):**
 
 - **ReviewAgent** — an Agent role that cognitively reviews another Run's output and
@@ -158,9 +159,12 @@ dogfooding).
 
 ## Key relationships
 
-- **Execution quartet:** a Run is the product of `{Agent, Sandbox, Workspace}` — Run
-  itself is the fourth member. `Agent 1:N Runs` (a role is materialized as many Runs);
-  `Task 1:N Runs`, each `Run 1:1 Sandbox`, all under one Engine.
+- **Execution quartet (atomic Runs/Sub-Runs):** an atomic Run is the product of
+  `{Agent, Sandbox, Workspace}` — Run itself is the fourth member. `Agent 1:N Runs` (a role is
+  materialized as many Runs); `Task 1:N Runs`, each atomic `Run 1:1 Sandbox`, all under one
+  Engine. **Orchestration Runs** (ADR-0016 §2) supervise N atomic Sub-Runs per a Workflow
+  template and have no Agent/Sandbox/Workspace of their own — the quartet applies to atomic
+  Runs and Sub-Runs.
 - **Work hierarchy:** `Project 1:N Tasks`; `Task ≡ 1 seeds issue`; `Task 1:N Runs`.
 - **Workspace:** per-Task base ref; per-Run isolated clone with in/out lineage.
 - **Gating flow:** coder-Run → candidate → **gate (always pre-merge)** → **two green
@@ -182,11 +186,10 @@ dogfooding).
 
 ## CRD boundary
 
-CRDs: `{Project, Agent, Prompt, QualityGate, Trigger, Run}`. Non-CR:
-`{Task, Sandbox, Workspace, ProjectManifest}`. **Workflow** is referenced by ADR-0009
-but is *forthcoming*, not yet a CRD (→ seed `dagmar-ff60`). The boundary follows each entity's state
-property (declarative/reconciled → CR; canonical-elsewhere or runtime → not) — see
-**ADR-0002** for the full table and rationale.
+CRDs: `{Project, Agent, Prompt, QualityGate, Trigger, Workflow, Run}` (Workflow added by
+ADR-0016). Non-CR: `{Task, Sandbox, Workspace, ProjectManifest}`. The boundary follows each
+entity's state property (declarative/reconciled → CR; canonical-elsewhere or runtime → not) —
+see **ADR-0002** for the full table and rationale (extended by ADR-0016 §7).
 
 ## CRD fields → Dagger construction (bridge)
 
@@ -201,10 +204,6 @@ seeds `dagmar-3684`, Go module layout & hex arch):
 | `checkable` | `CodeWorkspace(source, checkable)` |
 
 ## Open questions (tracked, not yet decided)
-
-- **Run concurrency & Workspace lineage** — concurrent Runs on one Task; who sequences
-  Workspace lineage. _(Deferred to control-plane design; engine tenancy decided in
-  ADR-0008, seeds `dagmar-cbb8`.)_
 
 ## Architectural decisions
 
@@ -222,3 +221,7 @@ See `docs/adr/`:
 - **ADR-0010** — Go module layout & hexagonal architecture (logic in `.dagger/internal`; functional core; `Dagmar` main object + `New` constructor)
 - **ADR-0011** — Sandbox trust-zones (hermetic LLM via tailored tool-sets; calculated residual risk; one singleton engine unchanged)
 - **ADR-0012** — Self-bootstrap & dogfooding trajectory (kind substrate; dispatch-vertical-first; lean controller-runtime; always-Dagger gate-family `dagmar-bootstrap`/`dagmar-gate`; cognition-before-autonomy)
+- **ADR-0013** — Kubernetes control-plane design (topology, reconciliation & dispatch)
+- **ADR-0014** — Platform/project scope separation (platform module vs. project conformance module)
+- **ADR-0015** — Per-Project-scoped identity (SA, RBAC, cache-vol isolation)
+- **ADR-0016** — Workflow-CRD framework (pipeline templates, dual-mode Run, controller-driven orchestration)
