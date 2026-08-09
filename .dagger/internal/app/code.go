@@ -17,15 +17,13 @@ import (
 //
 // The Env is constructed with WithMainModule(projectModule) — this registers the PROJECT
 // module's functions (dagmar-issues/dagmar-memory/dagmar-prompt, ADR-0019) as LLM tools.
-// WithCurrentModule() would register the PLATFORM module's (.dagger/) functions, which is
-// wrong (Review 26 A2). The project module is loaded from source via ModuleSource + AsModule.
+// The project module is loaded from moduleRef (the Project CR's moduleRef, ADR-0014).
 //
 // The prompt file is pre-composed by the controller (ADR-0005 cross-store merge) — this
 // function does NOT compose prompts. It receives a ready .md file for WithPromptFile.
 //
 // MaxAPICalls is the engine-enforced token/cost budget (v0.21.8 LLMOpts.MaxAPICalls).
-// When exhausted, the Loop terminates and the Run fails (gate RED → revise or escalate).
-// After the Loop, TokenUsage is read for cost accounting (written to Run output in Phase 2).
+// When exhausted, the Loop terminates and the Run fails (gate RED).
 //
 // Tier A is used directly here (no port); this path is integration-tested.
 func Code(
@@ -34,23 +32,24 @@ func Code(
 	promptFile *dagger.File,
 	model string,
 	maxAPICalls int,
+	// moduleRef is the project module reference (e.g. ".dagmar" for dogfooding, or
+	// "github.com/denkhaus/dagmar/.dagmar" for remote). Loaded via ModuleSource.
+	moduleRef string,
 ) (*dagger.Directory, error) {
-	client := dagger.Connect()
-
 	// 1. Load the project module so its functions become LLM tools.
-	//    ModuleSource(".dagmar") → AsModule() → Sync() forces load + validation.
-	projectMod, err := client.ModuleSource(".dagmar").AsModule().Sync(ctx)
+	//    ModuleSource(ref) → AsModule() → Sync() forces load + validation.
+	projectMod, err := dagger.Connect().ModuleSource(moduleRef).AsModule().Sync(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("code: load project module: %w", err)
+		return nil, fmt.Errorf("code: load project module %q: %w", moduleRef, err)
 	}
 
 	// 2. Build the Env: workspace + project module's LLM-Tool hooks (ADR-0021 D2).
-	env := client.Env().
+	env := dagger.Connect().Env().
 		WithWorkspace(source).
 		WithMainModule(projectMod)
 
 	// 3. Build the LLM with prompt + budget (ADR-0021 D4).
-	llm := client.LLM(dagger.LLMOpts{
+	llm := dagger.Connect().LLM(dagger.LLMOpts{
 		Model:       model,
 		MaxAPICalls: maxAPICalls,
 	}).
@@ -64,17 +63,17 @@ func Code(
 	}
 
 	// 5. Token usage (cost accounting — captured here, not by the controller).
-	//    Phase 2: write to Run output via a return struct or sidecar.
 	_, _ = llm.TokenUsage().TotalTokens(ctx)
 
-	// 6. Return the modified workspace. The controller dispatches Changeset()
+	// 6. Return the modified workspace. The controller dispatches Diff()
 	//    to extract the diff for the PR flow (ADR-0021 D8, ADR-0020 D3).
 	return source, nil
 }
 
 // Diff computes the difference between a pre-Loop and post-Loop workspace (ADR-0021 D8).
-// Returns a Directory containing only the changed files. The controller calls this after
-// Code() to extract the agent's changes for the PR flow.
+// Returns a Directory containing only the changed files (v0.21.8: Directory.Diff returns
+// *Directory, not *Changeset). The controller calls this after Code() to extract the
+// agent's changes for the PR flow.
 func Diff(after, before *dagger.Directory) *dagger.Directory {
 	return after.Diff(before)
 }

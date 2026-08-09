@@ -230,3 +230,19 @@ func (r *RunReconciler) transitionPipeline(ctx context.Context, run *v1alpha1.Ru
 func subRunName(parentRun, stage string) string {
 	return fmt.Sprintf("%s-%s", parentRun, stage)
 }
+
+// maxReviseRoundsFor reads the QualityGate referenced by the Workflow and returns
+// its MaxReviseRounds (default 3 if unset or QualityGate missing).
+func (r *RunReconciler) maxReviseRoundsFor(ctx context.Context, wf *v1alpha1.Workflow, namespace string) int {
+	if wf.Spec.QualityGateRef == "" {
+		return 3
+	}
+	qg := &v1alpha1.QualityGate{}
+	if err := r.Get(ctx, types.NamespacedName{Name: wf.Spec.QualityGateRef, Namespace: namespace}, qg); err != nil {
+		return 3 // default if not found
+	}
+	if qg.Spec.MaxReviseRounds > 0 {
+		return qg.Spec.MaxReviseRounds
+	}
+	return 3
+}

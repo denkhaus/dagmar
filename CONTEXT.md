@@ -62,8 +62,10 @@ function in the Project module. See ADR-0001; ADR-0018 (Tier-B redefined).
   `llm.TokenUsage()` for cost accounting. Prompt is pre-composed by the controller
   (ADR-0005 merge); the function receives a ready `.md` file.
 - **TokenUsage** — Dagger's cost observability (`llm.TokenUsage()` → `*LLMTokenUsage`).
-- **Changeset** — Dagger's diff representation (`workspace.Update()` or `after.Diff(before)` →
-  `*Changeset`); provides `.AsPatch()`, `.Before()`, `.After()`, `.DiffStats()`. Tier-A.
+- **Changeset** — Dagger's diff representation. Two paths: `Workspace.Update()` →
+  `*Changeset` (provides `.AsPatch()`, `.Before()`, `.After()`, `.DiffStats()`); and
+  `Directory.Diff(other)` → `*Directory` (v0.21.8: Diff returns `*Directory`, not `*Changeset`).
+  Tier-A.
 - **Tool** — Dagger configuration: what an agent may call (`dag.git` / `container` /
   `http` plus Project Hook Service exposures). dagmar coins no Tool type; an Agent's
   permitted tools are its `tool-set` field. A **hermetic** agent = its `tool-set` carries no

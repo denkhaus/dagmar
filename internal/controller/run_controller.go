@@ -477,7 +477,6 @@ func phaseFromConditions(conds []metav1.Condition) string {
 
 func agentPodName(runName string) string { return runName + "-agent" }
 
-// shellJoin joins args into a shell argument string (Phase 0 spike; no escaping — ModuleArgs are
 // shellJoin joins ModuleArgs into a shell argument string. See the SHELL-INJECTION NOTE on
 // agentPodFor: this is one of THREE unescaped interpolation sites (ModuleRef, ModuleFunction,
 // ModuleArgs) — all author-controlled in Phase 0; revisit for Phase 2 agent-generated Runs.

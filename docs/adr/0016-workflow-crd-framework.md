@@ -176,6 +176,9 @@ implement:
   orchestration Runs produce and supervise atomic Sub-Runs.
 - **Phase 2** implements: Workflow + Agent + Prompt CRD types, coder-loop function, the
   controller orchestration logic, and the first concrete Workflow instance (quality-gate family).
+  **Implementation refinement (Review 27 B1):** `WorkflowSpec.agents` map replaced by typed
+  `coderAgentRef` + `reviewerAgentRef` fields (schema validation, clearer for the quality-gate
+  family); `maxReviseRounds` moved from WorkflowSpec to QualityGateSpec.
 - **Phase 3** implements: Trigger CRD, event/webhook/cron model, and reactive/proactive dispatch.
 
 ## Alternatives considered

@@ -60,6 +60,8 @@ type AgentSpec struct {
 
 	// ToolSetPolicy controls the network/tool surface on the Agent's Env (ADR-0011).
 	// "hermetic" (default) excludes network-capable tools; "networked" allows them.
+	// Phase 2 incremental: not yet read by the controller; code() always uses
+	// WithMainModule (hermetic). Wired when networked agent roles are needed.
 	// +optional
 	// +kubebuilder:default=hermetic
 	ToolSetPolicy ToolSetPolicy `json:"toolSetPolicy,omitempty"`

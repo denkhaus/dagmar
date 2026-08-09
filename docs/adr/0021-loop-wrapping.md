@@ -196,7 +196,7 @@ The LLM can call `env.Checks().Run()` during the Loop to self-verify (ADR-0009: 
 in-loop self-verification"). The check results appear in the LLM's tool output, and the agent can
 iterate if checks fail.
 
-### D7 — Hermeticity: WithCurrentModule + excluded tools, not network isolation
+### D7 — Hermeticity: WithMainModule + excluded tools, not network isolation
 
 Per ADR-0011 §2, hermeticity is a **tool-surface constraint**. The `code` function's Env includes
 `WithCurrentModule()` (registers the LLM-Tool hooks — dagmar-issues/memory/prompt), but the
@@ -223,7 +223,7 @@ module:
 
 ```go
 // Changeset extracts the diff from a pre-Loop workspace and a post-Loop workspace.
-func (m *Dagmar) Changeset(
+func (m *Dagmar) Diff(
     ctx context.Context,
     // before is the pre-Loop workspace (the original clone).
     before *dagger.Directory,
@@ -234,7 +234,7 @@ func (m *Dagmar) Changeset(
 }
 ```
 
-The controller dispatches `Code` first (cognition), then `Changeset` (extraction), then
+The controller dispatches `Code` first (cognition), then `Diff` (extraction), then
 pushes the branch + creates the PR (controller-level, ADR-0020 D3).
 
 **Token usage:** `llm.TokenUsage()` is read inside `Code` and written to the Run's output

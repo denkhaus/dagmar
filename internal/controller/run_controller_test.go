@@ -181,7 +181,7 @@ func TestReconcile_EmptyModuleRefIsTerminalFailed(t *testing.T) {
 	}
 }
 
-func TestReconcile_EmptyModuleFunctionIsTerminalFailed(t *testing.T) {
+func TestReconcile_NeitherModuleFunctionNorWorkflowRefIsTerminalFailed(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = clientgoscheme.AddToScheme(scheme)
 	_ = v1alpha1.AddToScheme(scheme)

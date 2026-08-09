@@ -109,12 +109,17 @@ func (m *Dagmar) Code(
 	// +optional
 	// +default=100
 	maxAPICalls int,
+	// moduleRef is the project module reference (the Project CR's moduleRef).
+	// Defaults to ".dagmar" (dagmar dogfooding itself).
+	// +optional
+	// +default=".dagmar"
+	moduleRef string,
 ) (*dagger.Directory, error) {
 	src := source
 	if src == nil {
 		src = m.Project
 	}
-	return app.Code(ctx, src, promptFile, model, maxAPICalls)
+	return app.Code(ctx, src, promptFile, model, maxAPICalls, moduleRef)
 }
 
 // Diff computes the difference between a pre-Loop and post-Loop workspace (ADR-0021 D8).
