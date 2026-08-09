@@ -8,10 +8,13 @@ import (
 	"context"
 	"fmt"
 
-	"dagger/dagmar/internal/prompts"
+	_ "embed"
 
 	"dagger/dagmar/internal/dagger"
 )
+
+//go:embed adjudicator-meta.md
+var adjudicatorMetaPrompt string
 
 // Adjudicate is dagmar's adjudicator-loop (ADR-0023 D4). When the deterministic Gate and
 // the Reviewer-LLM disagree (gate green + reviewer veto, or gate red + reviewer approve),
@@ -21,7 +24,7 @@ import (
 // Unlike Code() (ADR-0021 D2) and Prompt() (ADR-0023 D1), the Adjudicator:
 //   - Does NOT use Writable=true — it reads source but never modifies it (read-only).
 //   - Has NO DirectoryOutput — the output is a string (the structured verdict), not a Directory.
-//   - Uses prompts.AdjudicatorMetaPrompt directly (NOT MetaPromptForPhase) — the Adjudicator
+//   - Uses adjudicatorMetaPrompt directly (NOT MetaPromptForPhase) — the Adjudicator
 //     is not a standard pipeline phase selected by the phase parameter.
 //   - Sends TWO WithPrompt calls: first the meta-prompt (role/instructions), then the
 //     structured disagreement context (gate result, review result, original task).
@@ -64,7 +67,7 @@ func Adjudicate(
 	// 1. Select the meta-prompt directly (ADR-0023 D9).
 	//    The Adjudicator is not a pipeline phase — its meta-prompt is referenced explicitly,
 	//    not via MetaPromptForPhase.
-	metaPrompt := prompts.AdjudicatorMetaPrompt
+	metaPrompt := adjudicatorMetaPrompt
 
 	// 2. Build the structured input context describing the disagreement.
 	//    This is the second WithPrompt — the meta-prompt is sent first (role/instructions),

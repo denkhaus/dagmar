@@ -8,10 +8,28 @@ import (
 	"context"
 	"fmt"
 
-	"dagger/dagmar/internal/prompts"
+	_ "embed"
 
 	"dagger/dagmar/internal/dagger"
 )
+
+//go:embed coder-meta.md
+var coderMetaPrompt string
+
+//go:embed reviewer-meta.md
+var reviewerMetaPrompt string
+
+// metaPromptForPhase returns the meta-prompt for the given pipeline phase.
+func metaPromptForPhase(phase string) string {
+	switch phase {
+	case "pre-code":
+		return coderMetaPrompt
+	case "pre-review":
+		return reviewerMetaPrompt
+	default:
+		return ""
+	}
+}
 
 // Prompt is dagmar's prompter-loop (ADR-0023 D1). It builds a read-only Env, constructs the LLM
 // with the phase-appropriate meta-prompt + task context, drives the Loop, and returns the
@@ -50,7 +68,7 @@ func Prompt(
 ) (string, error) {
 	// 1. Select the meta-prompt by phase (ADR-0023 D9).
 	//    "pre-code" → coder-meta.md, "pre-review" → reviewer-meta.md.
-	metaPrompt := prompts.MetaPromptForPhase(phase)
+	metaPrompt := metaPromptForPhase(phase)
 	if metaPrompt == "" {
 		return "", fmt.Errorf("prompt: unknown phase %q (want \"pre-code\" or \"pre-review\")", phase)
 	}

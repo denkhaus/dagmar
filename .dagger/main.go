@@ -18,20 +18,8 @@ import (
 	"dagger/dagmar/internal/app"
 	"dagger/dagmar/internal/dagger"
 	"dagger/dagmar/internal/domain"
-	"github.com/denkhaus/dagmar/manifest"
 )
 
-// ManifestContractVersion is a forward-looking anchor: the manifest-contract version this platform
-// build tracks (the published contract github.com/denkhaus/dagmar/manifest, dagmar-a1e0). It is NOT
-// yet enforced — no validation gates a project manifest against it today; the gate will assert the
-// project's declared version against this once manifests carry a version field. Its one real effect
-// now is structural: it makes .dagger a real consumer of the published contract at module load, so
-// dagger develop / the gate's dagger-module checkable exercise the published require on the platform
-// side too. Keeping the platform dependent on the published contract (not a project-local copy) is
-// what makes the manifest genuinely platform-authority (ADR-0014 GAP-1, resolved by dagmar-a1e0).
-const ManifestContractVersion = manifest.Version
-
-// Dagmar is dagmar's main Dagger object (auto-named from the module). It is the primary
 // entry point into dagmar's Dagger functionality AND the per-Project binding seam: the New
 // constructor binds the target Project once, and every method (Run, Sandbox, Gate, ...)
 // reuses that bound state (ADR-0010 §5). Project Hook Services (issues, memory, prompts)
