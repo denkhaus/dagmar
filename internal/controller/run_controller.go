@@ -155,7 +155,6 @@ func (r *RunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	var agentModel string
 	var agentMaxAPICalls int
 	var agentPrompt string
-	var agentMixins []string
 	if run.Spec.AgentRef != "" {
 		agent := &v1alpha1.Agent{}
 		if err := r.Get(ctx, types.NamespacedName{Name: run.Spec.AgentRef, Namespace: run.Namespace}, agent); err != nil {
@@ -168,7 +167,6 @@ func (r *RunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		agentModel = agent.Spec.Model
 		agentMaxAPICalls = agent.Spec.MaxAPICalls
 		agentPrompt = agent.Spec.Prompt.ProjectPrompt
-		agentMixins = agent.Spec.Prompt.DagmarMixins
 	}
 
 	// 4. Resolve the singleton engine pod (a Ready one). Transiently absent (engine still rolling
@@ -192,7 +190,7 @@ func (r *RunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		logger.Error(err, "ensure agent identity", "run", req.NamespacedName)
 		return ctrl.Result{}, err
 	}
-	pod, err := r.ensureAgentPod(ctx, run, project, enginePod, agentModel, agentMaxAPICalls, agentPrompt, agentMixins)
+	pod, err := r.ensureAgentPod(ctx, run, project, enginePod, agentModel, agentMaxAPICalls, agentPrompt)
 	if err != nil {
 		logger.Error(err, "ensure agent pod", "run", req.NamespacedName)
 		return ctrl.Result{}, err
@@ -279,7 +277,7 @@ func (r *RunReconciler) ensureAgentIdentity(ctx context.Context, run *v1alpha1.R
 }
 
 // ensureAgentPod creates the agent pod if it does not yet exist and returns it.
-func (r *RunReconciler) ensureAgentPod(ctx context.Context, run *v1alpha1.Run, project *v1alpha1.Project, enginePod string, agentModel string, agentMaxAPICalls int, agentPrompt string, agentMixins []string) (*corev1.Pod, error) {
+func (r *RunReconciler) ensureAgentPod(ctx context.Context, run *v1alpha1.Run, project *v1alpha1.Project, enginePod string, agentModel string, agentMaxAPICalls int, agentPrompt string) (*corev1.Pod, error) {
 	podName := agentPodName(run.Name)
 	pod := &corev1.Pod{}
 	err := r.Get(ctx, types.NamespacedName{Name: podName, Namespace: run.Namespace}, pod)
@@ -289,7 +287,7 @@ func (r *RunReconciler) ensureAgentPod(ctx context.Context, run *v1alpha1.Run, p
 	if !errors.IsNotFound(err) {
 		return nil, err
 	}
-	newPod := agentPodFor(run, project, enginePod, podName, agentModel, agentMaxAPICalls, agentPrompt, agentMixins)
+	newPod := agentPodFor(run, project, enginePod, podName, agentModel, agentMaxAPICalls, agentPrompt)
 	if err := ctrl.SetControllerReference(run, newPod, r.Scheme); err != nil {
 		return nil, fmt.Errorf("set controller reference: %w", err)
 	}
@@ -304,7 +302,7 @@ func (r *RunReconciler) ensureAgentPod(ctx context.Context, run *v1alpha1.Run, p
 // runs as the per-namespace dagmar-agent SA (granted pods/exec on the engine) and uses in-cluster
 // auth for the kubectl exec the runner host performs — no kubeconfig mount (unlike the cbb8 Probe
 // client, which ran outside the cluster).
-func agentPodFor(run *v1alpha1.Run, project *v1alpha1.Project, enginePod, podName string, agentModel string, agentMaxAPICalls int, agentPrompt string, agentMixins []string) *corev1.Pod {
+func agentPodFor(run *v1alpha1.Run, project *v1alpha1.Project, enginePod, podName string, agentModel string, agentMaxAPICalls int, agentPrompt string) *corev1.Pod {
 	image := defaultAgentPodImage
 	if project.Spec.AgentPodImage != "" {
 		image = project.Spec.AgentPodImage
@@ -336,23 +334,13 @@ func agentPodFor(run *v1alpha1.Run, project *v1alpha1.Project, enginePod, podNam
 	// Build the module function + args.
 	fnArgs := run.Spec.ModuleArgs
 	if agentModel != "" {
-		// Cognition Run (AgentRef set): provision canopy CLI, clone workspace, compose prompt,
-		// inject code() args.
-		//
-		// Canopy provisioning (ADR-0005 runtime delivery, dagmar-3302): install bun (musl build
-		// for alpine) + @os-eco/canopy-cli globally. The CLI (cn) renders the project prompt +
-		// DagmarMixins from the workspace's .canopy/ store.
-		apkPkgs += " jq unzip"
-		cnSetup := `curl -fsSL https://github.com/oven-sh/bun/releases/latest/download/bun-linux-x64-musl.zip -o /tmp/bun.zip && ` +
-			`unzip -o /tmp/bun.zip -d /tmp/bun && ` +
-			`cp /tmp/bun/bun-linux-x64-musl/bun /usr/local/bin/bun && ` +
-			`bun install -g @os-eco/canopy-cli && ` +
-			`export PATH="$HOME/.bun/bin:$PATH" && `
-		// Workspace clone (ADR-0020 D1): ephemeral git clone into /workspace.
-		// Prompt composition (ADR-0005): ShellComposeCommand renders project prompt + DagmarMixins
-		// via cn, merges section sets (jq, last-wins), writes /tmp/prompt.md.
-		composeCmd := prompt.ShellComposeCommand(agentPrompt, agentMixins, "/workspace", "/tmp/prompt.md")
-		preCall += cnSetup + fmt.Sprintf(
+		// Cognition Run (AgentRef set): clone workspace + write prompt + inject code() args.
+		// The workspace clone (ADR-0020 D1) is an ephemeral git clone into /workspace.
+		// The prompt file is a minimal stub for now — full ADR-0005 cross-store merge is
+		// deferred. The project prompt name from the AgentSpec is written as the prompt
+		// content placeholder until canopy composition is wired.
+		composeCmd := prompt.ShellComposeCommand(agentPrompt, "/workspace", "/tmp/prompt.md")
+		preCall += fmt.Sprintf(
 			`git clone %s /workspace && `+
 				`%s && `,
 			project.Spec.Repo, composeCmd,
