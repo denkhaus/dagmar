@@ -152,11 +152,10 @@ dogfooding).
 
 **In-repo manifest (not a CRD):**
 
-- **ProjectManifest** — the in-repo file (`.dagmar/project.yaml`) that each Project exposes.
-  **ADR-0017 supersedes the `checkables:` section** — checkable definitions now live in the
-  `dagmar-gate` Go function, not in the manifest. The manifest is **slimmed, not removed** (ADR-0017
-  §4): it carries Project metadata (display name, description, version) dagmar needs at runtime.
-  Git-native, versioned with the code; the Project CR references it by repo + path.
+- **ProjectManifest** — ~~the in-repo file (`.dagmar/project.yaml`)~~ **REMOVED** (ADR-0017 §3/§4 +
+  dagmar-3772). Checkable definitions now live entirely as **hard-coded Go code** inside the
+  `dagmar-gate` Dagger function — no YAML manifest is read at runtime. The gate owns both
+  definition and execution (ADR-0017 §3).
 
 **Roles (Agent specializations, not separate types):**
 

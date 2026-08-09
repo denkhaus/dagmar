@@ -42,11 +42,11 @@ func (m *Dagmar) DagmarBootstrap(
 	return workflows.Bootstrap(ctx, source, githubToken)
 }
 
-// DagmarGate is dagmar's gate-family VERIFY step (ADR-0009 §2 / ADR-0012 §4): an always-Dagger
-// function that runs the manifest-declared checkables (`.dagmar/project.yaml`) — manifest = what,
-// dagmar-gate = how (review-11 GAP-3). Reused in CI (`dagger call -m .dagmar dagmar-gate --source .`)
-// AND in-loop (coder self-verification, Phase 2). Exposes as the dagger function `dagmar-gate`.
-// Delegates to workflows.
+// DagmarGate is dagmar's gate-family VERIFY step (ADR-0009 §2 / ADR-0012 §4 / ADR-0017 §3):
+// an always-Dagger function with hard-coded Go checkables (NOT YAML manifest). The check logic —
+// build, vet, test, gofmt, secret scan, coverage — lives entirely in Go code inside the gate
+// function. Reused in CI (`dagger call -m .dagmar dagmar-gate --source .`) AND in-loop (coder
+// self-verification, Phase 2). Exposes as the dagger function `dagmar-gate`. Delegates to workflows.
 func (m *Dagmar) DagmarGate(
 	ctx context.Context,
 	// source is the Project's source tree (CI contract: `dagger call -m .dagmar dagmar-gate --source .`).
