@@ -5,7 +5,7 @@
 // This package IS the single source of truth for cross-module types. Every module that needs
 // GateResult, CheckResult, or meta-prompts imports from here — no duplication.
 //
-// Original purpose: the schema + parser for the
+// Originally the schema + parser for the
 // in-repo conformance contract each Project exposes at .dagmar/project.yaml (ADR-0003).
 //
 // Authority: platform, by construction. This package IS the contract (analogous to the Project
@@ -35,3 +35,8 @@
 // library implements (v0.1.0); the MODULE release tag (manifest/vX.Y.Z) is the publish artifact.
 // They are independent — a schema revision may ship across several module tags.
 package manifest
+
+// Versioning note (dagmar-481f): when manifest/ gains new exported types (GateResult, meta-prompts),
+// the git tag manifest/vX.Y.Z must be updated and pushed AFTER the commit lands on main. Until then,
+// go.work provides local resolution; published builds require the tag. The Version constant tracks
+// the contract schema revision independently of the module release tag.

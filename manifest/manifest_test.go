@@ -131,3 +131,35 @@ func TestGateResultFailedNoCoverage(t *testing.T) {
 		t.Errorf("output mismatch: %s", parsed.Checks[0].Output)
 	}
 }
+
+// TestSharedTypesExist verifies that the shared contract types are exported and accessible.
+// This is the duplication-prevention mechanism (dagmar-481f): manifest/ is the single source
+// of truth — all modules import from here, so there is nothing to duplicate.
+func TestSharedTypesExist(t *testing.T) {
+	// GateResult contract
+	g := GateResult{Passed: true, CoverageBps: 8230, FloorBps: 7850}
+	if !g.Passed {
+		t.Error("GateResult.Passed not settable")
+	}
+	c := CheckResult{Name: "test", Passed: true}
+	if c.Name != "test" {
+		t.Error("CheckResult.Name not settable")
+	}
+
+	// Meta-prompt constants
+	if CoderMetaPrompt == "" {
+		t.Error("CoderMetaPrompt is empty — go:embed failed")
+	}
+	if ReviewerMetaPrompt == "" {
+		t.Error("ReviewerMetaPrompt is empty — go:embed failed")
+	}
+	if AdjudicatorMetaPrompt == "" {
+		t.Error("AdjudicatorMetaPrompt is empty — go:embed failed")
+	}
+	if MetaPromptForPhase("pre-code") == "" {
+		t.Error("MetaPromptForPhase(pre-code) returned empty")
+	}
+	if MetaPromptForPhase("pre-review") == "" {
+		t.Error("MetaPromptForPhase(pre-review) returned empty")
+	}
+}
