@@ -1,6 +1,6 @@
 # ADR-0017: Unified Project Hooks — everything is Dagger code
 
-- **Status:** decided
+- **Status:** decided (`dagmar-prompt` hook removed — superseded by ADR-0023 Prompter-LLM)
 - **Date:** 2026-08-08
 - **Resolved in:** seed dagmar-e8f3 (spike) + this ADR
 - **Evidence:** grilling session 2026-08-08; builds on ADR-0003 (ProjectManifest), ADR-0009 §2

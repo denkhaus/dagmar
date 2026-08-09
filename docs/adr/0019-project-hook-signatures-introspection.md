@@ -1,6 +1,6 @@
 # ADR-0019: Project Hook function signatures + introspection conformance
 
-- **Status:** decided
+- **Status:** decided (`dagmar-prompt` hook D2/D3 removed — superseded by ADR-0023 Prompter-LLM)
 - **Date:** 2026-08-09
 - **Resolved in:** seed dagmar-c712 + this ADR
 - **Evidence:** builds on ADR-0017 (hook registry), ADR-0018 (port layer removed), ADR-0005

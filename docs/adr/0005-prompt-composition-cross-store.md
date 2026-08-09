@@ -1,6 +1,6 @@
 # ADR-0005: Prompt composition — dagmar-side cross-store merge (Variant A)
 
-- **Status:** decided
+- **Status:** ~~decided~~ **superseded by ADR-0023** (Prompter-LLM replaces the cross-store merge)
 - **Date:** 2026-07-31
 - **Resolved in:** seeds `dagmar-8097` (ProjectManifest spec) + canopy spike
   (`docs/research/canopy-prompt-model.md`)

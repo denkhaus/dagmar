@@ -1,6 +1,6 @@
 # ADR-0006: Autonomy model
 
-- **Status:** decided (Calibration Agent design captured, implementation deferred)
+- **Status:** decided (Calibration Agent replaced by Adjudicator — see ADR-0023 §D4)
 - **Date:** 2026-07-31
 - **Resolved in:** seeds `dagmar-fa45`
 
