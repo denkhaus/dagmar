@@ -448,13 +448,16 @@ func TestReconcile_CognitionRunInjectsWorkspaceAndPrompt(t *testing.T) {
 	}
 	r, cl := newTestReconciler(t, run)
 
-	// Create the Agent.
+	// Create the Agent with DagmarMixins (ADR-0005 runtime delivery).
 	agent := &v1alpha1.Agent{
 		ObjectMeta: metav1.ObjectMeta{Name: "coder-agent", Namespace: "default"},
 		Spec: v1alpha1.AgentSpec{
 			Model:       "test-model",
 			MaxAPICalls: 50,
-			Prompt:      v1alpha1.PromptRef{ProjectPrompt: "coder-prompt"},
+			Prompt: v1alpha1.PromptRef{
+				ProjectPrompt: "coder-prompt",
+				DagmarMixins:  []string{"dagmar-operational"},
+			},
 		},
 	}
 	if err := cl.Create(ctx, agent); err != nil {
@@ -469,12 +472,18 @@ func TestReconcile_CognitionRunInjectsWorkspaceAndPrompt(t *testing.T) {
 		t.Fatalf("get pod: %v", err)
 	}
 	cmd := pod.Spec.Containers[0].Command[2]
+	// Should contain canopy provisioning (bun + cn).
+	assertContains(t, cmd, "bun install -g @os-eco/canopy-cli")
 	// Should contain workspace clone + prompt + code() args.
 	assertContains(t, cmd, "git clone")
 	assertContains(t, cmd, "/workspace")
 	assertContains(t, cmd, "/tmp/prompt.md")
-	assertContains(t, cmd, "cn render")
-	assertContains(t, cmd, "coder-prompt")
+	// Should render both project prompt and DagmarMixins.
+	assertContains(t, cmd, "cn render coder-prompt")
+	assertContains(t, cmd, "cn render dagmar-operational")
+	// Should contain jq-based section merge.
+	assertContains(t, cmd, "jq")
+	// code() args.
 	assertContains(t, cmd, "--model")
 	assertContains(t, cmd, "test-model")
 	assertContains(t, cmd, "--max-apicalls")

@@ -65,11 +65,30 @@ func TestCompose_MergeAndOverride(t *testing.T) {
 }
 
 func TestShellComposeCommand(t *testing.T) {
-	cmd := ShellComposeCommand("coder-prompt", "/workspace", "/tmp/prompt.md")
+	cmd := ShellComposeCommand("coder-prompt", nil, "/workspace", "/tmp/prompt.md")
 	if !strings.Contains(cmd, "cn render coder-prompt") {
 		t.Errorf("expected cn render in command, got: %s", cmd)
 	}
 	if !strings.Contains(cmd, "/tmp/prompt.md") {
 		t.Errorf("expected output path in command")
+	}
+}
+
+func TestShellComposeCommand_WithMixins(t *testing.T) {
+	cmd := ShellComposeCommand("coder-prompt", []string{"safety", "output-format"}, "/workspace", "/tmp/prompt.md")
+	if !strings.Contains(cmd, "cn render coder-prompt") {
+		t.Errorf("expected project prompt render, got: %s", cmd)
+	}
+	if !strings.Contains(cmd, "cn render safety") {
+		t.Errorf("expected mixin safety render, got: %s", cmd)
+	}
+	if !strings.Contains(cmd, "cn render output-format") {
+		t.Errorf("expected mixin output-format render, got: %s", cmd)
+	}
+	// Mixins should appear before the project prompt (lower priority in the merge).
+	safetyIdx := strings.Index(cmd, "cn render safety")
+	projectIdx := strings.Index(cmd, "cn render coder-prompt")
+	if safetyIdx == -1 || projectIdx == -1 || safetyIdx > projectIdx {
+		t.Errorf("mixins should be rendered before project prompt")
 	}
 }

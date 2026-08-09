@@ -1,12 +1,13 @@
 // Package prompt implements dagmar's cross-store prompt composition (ADR-0005, Variant A).
 //
-// STATUS (Review 29 A2/A3): The full canopy-based composition (render project prompt +
-// dagmar mixins via `cn`, merge in Go via Compose()) is STRUCTURALLY PRESENT but NOT
-// FUNCTIONAL at runtime: the agent pod does not install canopy CLI (`cn`), so every
-// `cn render` call fails. The controller currently uses ShellComposeCommand which falls
-// back to a minimal stub prompt. This is acceptable for the cognition proof (dagmar-9571);
-// the runtime delivery (provisioning `cn` in the pod, rendering DagmarMixins, calling
-// Compose()) is deferred to a follow-up seed (ADR-0005 runtime delivery).
+// The agent pod provisions canopy CLI (cn) via bun at startup, then ShellComposeCommand
+// renders the project prompt + DagmarMixins, merges section sets following canopy's
+// resolution rules (parent/mixins first, self last; same-name = last wins), and writes
+// the final markdown to /tmp/prompt.md before the code() call.
+//
+// Compose() is the Go reference implementation of the section merge — unit-tested and
+// available for future controller-side composition. The pod-side shell command (via jq)
+// replicates its merge semantics at runtime.
 //
 // dagmar-prompt (ADR-0019) is a separate in-loop LLM tool for on-demand project prompt
 // rendering — it supplements this composition, not replaces it.
@@ -25,8 +26,9 @@ import (
 // .canopy/ store. The dagmar sections come from `cn render <mixin> --format json` in dagmar's
 // own .canopy/ store. Both are rendered as section sets before this function merges them.
 //
-// STATUS: unit-tested but NOT wired into the runtime dispatch path. The controller uses
-// ShellComposeCommand (which renders at most a stub). Full wiring deferred (see package doc).
+// STATUS: Go reference implementation of the merge. Unit-tested. The pod-side
+// ShellComposeCommand replicates this logic via jq at runtime (same semantics:
+// mixins first, project last, same-name = last wins).
 func Compose(projectSections, dagmarSections []Section) string {
 	merged := make(map[string]string)
 
@@ -77,33 +79,51 @@ func sortStrings(s []string) {
 	}
 }
 
-// ShellRenderCommand builds the shell command to render a canopy prompt to a .md file
-// inside a container. `cn render <name> --format text` renders the resolved prompt to stdout.
-// STATUS: NOT called by any production code path (Review 29 A3). Retained for the future
-// runtime delivery when canopy CLI is provisioned in the agent pod.
+// ShellRenderCommand builds the shell command to render a single canopy prompt to a .md file
+// inside a container. Strips the canopy header lines (name, version, resolved-from) so
+// only the ## section bodies remain.
 func ShellRenderCommand(promptName string, canopyDir string, outputPath string) string {
 	return fmt.Sprintf(
-		`cd %s && cn render %s --format text > %s`,
+		`cd %s && cn render %s --format md 2>/dev/null | awk '/^## /{p=1} p' > %s`,
 		canopyDir, promptName, outputPath,
 	)
 }
 
-// ShellComposeCommand builds a shell command that writes the agent prompt to outputPath.
+// ShellComposeCommand builds a shell command that performs the ADR-0005 cross-store
+// composition inside the agent pod. It renders the project prompt and each DagmarMixin
+// via canopy CLI (cn), merges the section sets following canopy's resolution rules
+// (parent/mixins first, self last; same-name section = last wins), and writes the final
+// markdown to outputPath.
 //
-// CURRENT BEHAVIOR (Review 29 A2 fix): canopy CLI (`cn`) is NOT installed in the agent pod
-// yet. The command attempts `cn render` first; when it fails (command not found), the
-// fallback writes a functional stub prompt with real newlines (printf, not echo). The stub
-// includes the project prompt name so the agent knows which canopy prompt it would have
-// received. DagmarMixins are not rendered (deferred — see package doc).
+// The merge uses jq to deduplicate sections by name (matching Compose() semantics):
+// all section objects are collected (mixins first, project last), reduced into a
+// name→body map (last wins), then emitted as ## section markdown.
 //
-// FUTURE: when `cn` is provisioned in the pod, this command will cd into workspaceDir/.canopy
-// and render the project prompt via canopy. Full cross-store merge (Compose + DagmarMixins)
-// is deferred.
-func ShellComposeCommand(projectPrompt string, workspaceDir string, outputPath string) string {
-	// Attempt canopy render first; fall back to a functional stub with real newlines.
-	// Uses printf (not echo) so \n produces actual newlines in busybox.
+// If cn is not available (not yet provisioned), the command falls back to a functional
+// stub prompt so the agent pod can still proceed (Phase 0 resilience).
+func ShellComposeCommand(projectPrompt string, dagmarMixins []string, workspaceDir string, outputPath string) string {
+	// Build section-collecting subcommands: mixins first (lower priority),
+	// then the project prompt (highest priority — overrides same-named sections).
+	// Each renders as JSON and extracts individual section objects via jq.
+	var renders []string
+	for _, m := range dagmarMixins {
+		renders = append(renders, fmt.Sprintf(
+			`cn render %s --format json 2>/dev/null | jq -c '.sections[]'`,
+			m,
+		))
+	}
+	renders = append(renders, fmt.Sprintf(
+		`cn render %s --format json 2>/dev/null | jq -c '.sections[]'`,
+		projectPrompt,
+	))
+	allRenders := strings.Join(renders, "; ")
+
+	// Merge: pipe all section JSONs through jq to dedup by name (last wins)
+	// and emit as ## section markdown — exactly what Compose() produces.
+	mergeJq := `jq -rs 'reduce .[] as $s ({}; .[$s.name]=$s.body) | to_entries[] | "## \(.key)\n\n\(.value)\n"'`
+
 	return fmt.Sprintf(
-		`cd %s && cn render %s --format text > %s 2>/dev/null || printf '%%s\n' '# Agent Prompt' '' 'Project prompt (canopy not available): %s' 'See the project module'"'"'s prompt documentation for full instructions.' > %s`,
-		workspaceDir, projectPrompt, outputPath, projectPrompt, outputPath,
+		`cd %s && { %s } | %s > %s 2>/dev/null || printf '%%s\n' '# Agent Prompt' '' 'Project prompt (canopy not available): %s' 'See the project module'"'"'s prompt documentation for full instructions.' > %s`,
+		workspaceDir, allRenders, mergeJq, outputPath, projectPrompt, outputPath,
 	)
 }
