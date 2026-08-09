@@ -11,13 +11,20 @@ import (
 	"dagger/dagmar/internal/dagger"
 )
 
-// Code is dagmar's coder-loop (Phase 2 cognition, ADR-0021 D2). It builds the Dagger Env
-// (workspace + project module's LLM-Tool hooks), constructs the LLM with prompt + budget,
-// drives the Loop, and returns the modified workspace Directory.
+// Code is dagmar's coder-loop (Phase 2 cognition, ADR-0021 D2). It builds the Dagger Env,
+// constructs the LLM with prompt + budget, drives the Loop, and returns the modified workspace
+// Directory.
 //
-// The Env is constructed with WithMainModule(projectModule) — this registers the PROJECT
-// module's functions (dagmar-issues/dagmar-memory/dagmar-prompt, ADR-0019) as LLM tools.
-// The project module is loaded from moduleRef (the Project CR's moduleRef, ADR-0014).
+// The Env is constructed with:
+//   - Privileged=true: gives the LLM access to the core Dagger API (Directory, File, Container,
+//     etc.) — without this the agent only sees DeclareOutput + ReadLogs and cannot read/write files.
+//   - Writable=true: allows the LLM to declare and save outputs (the modified workspace).
+//   - DirectoryInput("source", ...): the project source the agent reads from.
+//   - DirectoryOutput("result", ...): where the agent saves the modified source via the Save tool.
+//   - WithMainModule(projectMod): registers the project module's LLM-Tool hooks (ADR-0019)
+//     when moduleRef is non-empty.
+//
+// After the Loop, the "result" output binding holds the agent's modified workspace.
 //
 // The prompt file is pre-composed by the controller (ADR-0005 cross-store merge) — this
 // function does NOT compose prompts. It receives a ready .md file for WithPromptFile.
@@ -32,23 +39,31 @@ func Code(
 	promptFile *dagger.File,
 	model string,
 	maxAPICalls int,
-	// moduleRef is the project module reference (e.g. ".dagmar" for dogfooding, or
-	// "github.com/denkhaus/dagmar/.dagmar" for remote). Loaded via ModuleSource.
+	// moduleRef is the project module reference (e.g. "github.com/denkhaus/dagmar/.dagmar"
+	// for remote dogfooding). Loaded via ModuleSource. When empty, no project module is
+	// loaded — the agent has core API tools only (no LLM-Tool hooks).
 	moduleRef string,
 ) (*dagger.Directory, error) {
-	// 1. Load the project module so its functions become LLM tools.
-	//    ModuleSource(ref) → AsModule() → Sync() forces load + validation.
 	client := dagger.Connect()
 
-	projectMod, err := client.ModuleSource(moduleRef).AsModule().Sync(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("code: load project module %q: %w", moduleRef, err)
-	}
+	// 1. Build the Env: privileged + writable + input/output directory bindings.
+	//    The agent reads from "source", modifies via Directory.withNewFile etc.,
+	//    and saves the result via the Save tool to "result".
+	env := client.Env(dagger.EnvOpts{
+		Privileged: true,
+		Writable:   true,
+	}).
+		WithDirectoryInput("source", source, "The project source directory").
+		WithDirectoryOutput("result", "The modified source directory after the agent's work")
 
-	// 2. Build the Env: workspace + project module's LLM-Tool hooks (ADR-0021 D2).
-	env := client.Env().
-		WithWorkspace(source).
-		WithMainModule(projectMod)
+	// 2. Optionally load the project module so its functions become LLM tools (ADR-0019).
+	if moduleRef != "" {
+		projectMod, err := client.ModuleSource(moduleRef).AsModule().Sync(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("code: load project module %q: %w", moduleRef, err)
+		}
+		env = env.WithMainModule(projectMod)
+	}
 
 	// 3. Build the LLM with prompt + budget (ADR-0021 D4).
 	llm := client.LLM(dagger.LLMOpts{
@@ -67,9 +82,11 @@ func Code(
 	// 5. Token usage (cost accounting — captured here, not by the controller).
 	_, _ = llm.TokenUsage().TotalTokens(ctx)
 
-	// 6. Return the modified workspace. The controller dispatches Diff()
-	//    to extract the diff for the PR flow (ADR-0021 D8, ADR-0020 D3).
-	return source, nil
+	// 6. Read the "result" output binding — the agent's modified workspace.
+	//    The controller dispatches Diff() to extract the diff for the PR flow
+	//    (ADR-0021 D8, ADR-0020 D3).
+	result := env.Output("result").AsDirectory()
+	return result, nil
 }
 
 // Diff computes the difference between a pre-Loop and post-Loop workspace (ADR-0021 D8).

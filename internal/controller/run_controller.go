@@ -352,7 +352,7 @@ func agentPodFor(run *v1alpha1.Run, project *v1alpha1.Project, enginePod, podNam
 			"--model", agentModel,
 		)
 		if agentMaxAPICalls > 0 {
-			fnArgs = append(fnArgs, "--max-api-calls", fmt.Sprintf("%d", agentMaxAPICalls))
+			fnArgs = append(fnArgs, "--max-apicalls", fmt.Sprintf("%d", agentMaxAPICalls))
 		}
 	}
 	cmd := fmt.Sprintf(

@@ -477,7 +477,7 @@ func TestReconcile_CognitionRunInjectsWorkspaceAndPrompt(t *testing.T) {
 	assertContains(t, cmd, "coder-prompt")
 	assertContains(t, cmd, "--model")
 	assertContains(t, cmd, "test-model")
-	assertContains(t, cmd, "--max-api-calls")
+	assertContains(t, cmd, "--max-apicalls")
 	assertContains(t, cmd, "50")
 	assertContains(t, cmd, "--module-ref")
 }
