@@ -110,7 +110,7 @@ dogfooding).
   advance (checkables + rules). **Invariant** — always secures quality. Merge requires
   QualityGate.green **AND** ReviewAgent.approve (two green lights, ADR-0006); the
   ReviewAgent holds a hard veto. Per-Project; codebase-evolving (grows via the
-  Calibration Agent).
+  Adjudicator).
 - **Trigger** (CRD) — declarative event source that creates Tasks. Reactive (GitHub
   webhooks) or proactive (cron housekeeping). Bound to a Project + Workflow
   (`spec.workflowRef`, ADR-0016 §6) + event-mapping.
@@ -164,9 +164,9 @@ dogfooding).
   holds a **hard veto**; co-equal gate with the QualityGate (merge needs both green,
   ADR-0006). The reviewer's prompt is synthesized by the Prompter-LLM (ADR-0023 D2,
   pre-review phase).
-- **Calibration Agent** *(deferred)* — a non-gating LLM step that, on QualityGate ↔
-  ReviewAgent disagreement, diagnoses the cause and emits project-specific
-  `review-calibration` mixins into the project's canopy (ADR-0006).
+- **Adjudicator** — an Agent role that resolves Gate ↔ Reviewer disagreement (replaces
+  the deferred Calibration Agent, ADR-0023 D4). Three paths: calibrate the reviewer, instruct the
+  coder to repair the gate, or escalate to a human.
 - **planner / architect** — an Agent role that decomposes work into seeds issues
   (future).
 
@@ -203,10 +203,10 @@ dogfooding).
   not an LLM action (ADR-0006). The **post-merge watchdog** is a **separate workflow**
   with a filtered trigger (fires only on human/spontaneous merges); Gate-Red/Veto there
   opens a fix-PR (ADR-0009 §8) — it is *not* "the gate running post-merge".
-- **Disagreement (Gate ↔ Reviewer):** revise if the veto is actionable; else
-  **escalate** to a human. The deferred Calibration Agent (ADR-0006) will later
-  diagnose gate-gaps automatically; until then every unresolved disagreement
-  escalates.
+- **Disagreement (Gate ↔ Reviewer):** the Adjudicator resolves it via one of three paths
+  (calibrate reviewer / instruct coder to repair gate / escalate to human, ADR-0023 D4). When
+  AdjudicatorAgentRef is unset or the Adjudicator cannot resolve, every unresolved disagreement
+  escalates to a human.
 - **Trigger flow:** Trigger → seeds issue → Task → Run(s).
 - **Project Hook Services:** per-Project Dagger functions; N+1 contexts (ADR-0018).
 - **Two paths to seeds:** the controller observes seeds directly (scheduling/state);
