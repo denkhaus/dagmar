@@ -11,6 +11,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // Annotation keys for prompter configuration on Sub-Runs (ADR-0023 D3). The
@@ -21,6 +22,11 @@ const (
 	annPrompterModel       = "dagmar.denkhaus.io/prompter-model"
 	annPrompterMaxAPICalls = "dagmar.denkhaus.io/prompter-max-apicalls"
 	annPrompterPhase       = "dagmar.denkhaus.io/prompter-phase"
+	// annCoverageFloor is set on the coder Sub-Run when CoveragePolicy is enabled
+	// (dagmar-4154). The atomic-Run Reconcile path reads it and passes
+	// --coverage-floor-bps to `dagger call dagmar-gate` in the agent pod, so the
+	// gate runs inside the coder's pod as self-verification.
+	annCoverageFloor = "dagmar.denkhaus.io/coverage-floor"
 )
 
 // Prompter phases (ADR-0023 D2). These select the meta-prompt the prompter uses.
@@ -118,8 +124,15 @@ func (r *RunReconciler) advanceCoding(ctx context.Context, run *v1alpha1.Run, pr
 	}
 
 	subName := subRunName(run.Name, fmt.Sprintf("coder-r%d", run.Status.CurrentRound+1))
+	// Coverage floor for the coder Sub-Run (dagmar-4154): when CoveragePolicy is
+	// enabled, annotate the coder Sub-Run with the ratcheted floor so the agent
+	// pod passes --coverage-floor-bps to `dagger call dagmar-gate` during
+	// self-verification. The actual gate call runs inside the pod; the
+	// controller's gate evaluation stays a stub (advanceGating).
+	coverageFloorBps := coverageFloorFor(project)
+
 	sub, err := r.getOrCreateSubRun(ctx, run, subName, wf.Spec.CoderAgentRef, project, "code",
-		prompter.Spec.Model, prompter.Spec.MaxAPICalls, prompterPhasePreCode)
+		prompter.Spec.Model, prompter.Spec.MaxAPICalls, prompterPhasePreCode, coverageFloorBps)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -157,11 +170,32 @@ func (r *RunReconciler) advanceCoding(ctx context.Context, run *v1alpha1.Run, pr
 // Phase 2: gate-green is assumed when the coder Sub-Run succeeded (full gate
 // evaluation via `dagger call gate` is a follow-up, ADR-0020 D3). Gate green →
 // reviewing (if reviewer configured) or done. Gate red → revise loop.
+//
+// Coverage ratcheting (dagmar-4154): the real gate — including coverage
+// measurement — runs inside the coder's agent pod (the coder Sub-Run was
+// annotated with the coverage floor). The controller cannot measure coverage
+// directly (it is a K8s reconciler, not a Dagger client). For now, if the coder
+// Sub-Run succeeded, the gate is assumed green. When CoveragePolicy is enabled
+// and the ratcheted floor is still 0, initialise it to MinimumFloor on the first
+// successful run. Full ratcheting (reading coverage from the pod output and
+// ratcheting the floor upward) is a follow-up.
 func (r *RunReconciler) advanceGating(ctx context.Context, run *v1alpha1.Run, project *v1alpha1.Project, wf *v1alpha1.Workflow) (ctrl.Result, error) {
 	// TODO(follow-up): call `dagger call gate --source <coder-result>` and parse
 	// the deterministic output (green/red). For now, gate-green is assumed when
-	// the coder Sub-Run succeeded (ADR-0020 D3).
+	// the coder Sub-Run succeeded (ADR-0020 D3). The real gate — including
+	// coverage enforcement — runs inside the coder's agent pod.
 	gateGreen := true
+
+	// Coverage floor initialisation (dagmar-4154): when CoveragePolicy is enabled
+	// and the ratcheted floor (Status.CoverageFloor) is still 0, set it to
+	// MinimumFloor on the first successful gate. Full ratcheting (measuring actual
+	// coverage from the pod output and ratcheting the floor upward) is a follow-up.
+	if gateGreen && project.Spec.CoveragePolicy != nil && project.Spec.CoveragePolicy.Enabled &&
+		project.Status.CoverageFloor == 0 {
+		if err := r.patchProjectCoverageFloor(ctx, project, project.Spec.CoveragePolicy.MinimumFloor); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
 
 	if gateGreen {
 		if wf.Spec.ReviewerAgentRef != "" && wf.Spec.RequiresTwoGreen {
@@ -199,8 +233,9 @@ func (r *RunReconciler) advanceReviewing(ctx context.Context, run *v1alpha1.Run,
 	}
 
 	subName := subRunName(run.Name, fmt.Sprintf("review-r%d", run.Status.CurrentRound+1))
+	// Reviewer Sub-Run: no coverage floor (only the coder runs the gate).
 	sub, err := r.getOrCreateSubRun(ctx, run, subName, wf.Spec.ReviewerAgentRef, project, "code",
-		prompter.Spec.Model, prompter.Spec.MaxAPICalls, prompterPhasePreReview)
+		prompter.Spec.Model, prompter.Spec.MaxAPICalls, prompterPhasePreReview, 0)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -238,8 +273,9 @@ func (r *RunReconciler) advanceReviewing(ctx context.Context, run *v1alpha1.Run,
 func (r *RunReconciler) advanceAdjudicating(ctx context.Context, run *v1alpha1.Run, project *v1alpha1.Project, wf *v1alpha1.Workflow) (ctrl.Result, error) {
 	subName := subRunName(run.Name, fmt.Sprintf("adjudicate-r%d", run.Status.CurrentRound+1))
 	// The adjudicator runs without a chained prompter (empty model/phase).
+	// Adjudicator Sub-Run: no coverage floor.
 	sub, err := r.getOrCreateSubRun(ctx, run, subName, wf.Spec.AdjudicatorAgentRef, project, "code",
-		"", 0, "")
+		"", 0, "", 0)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -275,7 +311,7 @@ func (r *RunReconciler) getAgent(ctx context.Context, name, namespace string) (*
 // The Sub-Run carries ModuleFunction + AgentRef + ParentRun + prompter annotations.
 // The prompter annotations (model, maxAPICalls, phase) drive the chained prompt()
 // call in the Pod command built by agentPodFor (ADR-0023 D3).
-func (r *RunReconciler) getOrCreateSubRun(ctx context.Context, parent *v1alpha1.Run, name string, agentRef string, project *v1alpha1.Project, fn string, prompterModel string, prompterMaxAPICalls int, prompterPhase string) (*v1alpha1.Run, error) {
+func (r *RunReconciler) getOrCreateSubRun(ctx context.Context, parent *v1alpha1.Run, name string, agentRef string, project *v1alpha1.Project, fn string, prompterModel string, prompterMaxAPICalls int, prompterPhase string, coverageFloorBps int) (*v1alpha1.Run, error) {
 	sub := &v1alpha1.Run{}
 	err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: parent.Namespace}, sub)
 	if err == nil {
@@ -289,6 +325,11 @@ func (r *RunReconciler) getOrCreateSubRun(ctx context.Context, parent *v1alpha1.
 		annotations[annPrompterModel] = prompterModel
 		annotations[annPrompterMaxAPICalls] = strconv.Itoa(prompterMaxAPICalls)
 		annotations[annPrompterPhase] = prompterPhase
+	}
+	// Coverage floor annotation (dagmar-4154): the atomic-Run Reconcile path reads
+	// this and passes --coverage-floor-bps to `dagger call dagmar-gate` in the pod.
+	if coverageFloorBps > 0 {
+		annotations[annCoverageFloor] = strconv.Itoa(coverageFloorBps)
 	}
 	sub = &v1alpha1.Run{
 		ObjectMeta: metav1.ObjectMeta{
@@ -378,4 +419,30 @@ func (r *RunReconciler) maxReviseRoundsFor(ctx context.Context, wf *v1alpha1.Wor
 		return qg.Spec.MaxReviseRounds
 	}
 	return 3
+}
+
+// coverageFloorFor resolves the coverage floor (basis points) to annotate on the
+// coder Sub-Run. Returns 0 (disabled) when CoveragePolicy is not set or not
+// enabled. When enabled, returns the current ratcheted floor (Status.CoverageFloor).
+func coverageFloorFor(project *v1alpha1.Project) int {
+	if project.Spec.CoveragePolicy == nil || !project.Spec.CoveragePolicy.Enabled {
+		return 0
+	}
+	return project.Status.CoverageFloor
+}
+
+// patchProjectCoverageFloor patches the Project's Status.CoverageFloor via the
+// status subresource (dagmar-4154). Used for ratcheting: the controller updates
+// the floor after a successful gate.
+func (r *RunReconciler) patchProjectCoverageFloor(ctx context.Context, project *v1alpha1.Project, floorBps int) error {
+	fresh := &v1alpha1.Project{}
+	if err := r.Get(ctx, types.NamespacedName{Name: project.Name, Namespace: project.Namespace}, fresh); err != nil {
+		return fmt.Errorf("get project for coverage-floor patch: %w", err)
+	}
+	base := fresh.DeepCopy()
+	fresh.Status.CoverageFloor = floorBps
+	if err := r.Status().Patch(ctx, fresh, client.MergeFrom(base)); err != nil {
+		return fmt.Errorf("patch project coverage-floor: %w", err)
+	}
+	return nil
 }

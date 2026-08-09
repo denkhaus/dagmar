@@ -3,3 +3,4 @@
 # must `go build` them. The .gitattributes marks them linguist-generated so GitHub hides them from
 # diffs/stats. Regenerate via `dagger develop` after signature changes, then commit the result.
 /.env
+/internal/telemetry

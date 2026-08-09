@@ -397,3 +397,121 @@ func setRunStatusPhase(t *testing.T, cl client.Client, key types.NamespacedName,
 		t.Fatalf("patch run status: %v", err)
 	}
 }
+
+
+// setProjectCoveragePolicy patches a Project to add a CoveragePolicy (spec) and
+// optionally a CoverageFloor status value (for test setup). Spec and status are
+// patched separately because the status subresource only applies status changes.
+func setProjectCoveragePolicy(t *testing.T, cl client.Client, key types.NamespacedName, policy *v1alpha1.CoveragePolicy, floorBps int) {
+	t.Helper()
+	// Spec change (CoveragePolicy).
+	proj := &v1alpha1.Project{}
+	if err := cl.Get(ctx, key, proj); err != nil {
+		t.Fatalf("get project %v: %v", key, err)
+	}
+	specBase := proj.DeepCopy()
+	proj.Spec.CoveragePolicy = policy
+	if err := cl.Patch(ctx, proj, client.MergeFrom(specBase)); err != nil {
+		t.Fatalf("patch project spec: %v", err)
+	}
+	// Status change (CoverageFloor).
+	statusBase := proj.DeepCopy()
+	proj.Status.CoverageFloor = floorBps
+	if err := cl.Status().Patch(ctx, proj, client.MergeFrom(statusBase)); err != nil {
+		t.Fatalf("patch project status: %v", err)
+	}
+}
+
+// TestReconcile_CoverageFloorAnnotation verifies that when CoveragePolicy is
+// enabled on the Project, the coder Sub-Run is annotated with the coverage floor.
+func TestReconcile_CoverageFloorAnnotation(t *testing.T) {
+	run := &v1alpha1.Run{
+		ObjectMeta: metav1.ObjectMeta{Name: "cov-1", Namespace: "default"},
+		Spec: v1alpha1.RunSpec{
+			ProjectRef:  "test-proj",
+			WorkflowRef: "test-workflow",
+		},
+	}
+	r, cl := newTestOrchestrationReconciler(t, run)
+
+	// Enable CoveragePolicy and set a floor on the project created by the harness.
+	setProjectCoveragePolicy(t, cl,
+		types.NamespacedName{Name: "test-proj", Namespace: "default"},
+		&v1alpha1.CoveragePolicy{Enabled: true, MinimumFloor: 5000, RatchetMargin: 200},
+		7850)
+
+	mustReconcile(t, ctx, r, ctrl.Request{NamespacedName: types.NamespacedName{Name: "cov-1", Namespace: "default"}})
+
+	// Coder Sub-Run should have the coverage-floor annotation.
+	subName := subRunName("cov-1", "coder-r1")
+	sub := &v1alpha1.Run{}
+	if err := cl.Get(ctx, types.NamespacedName{Name: subName, Namespace: "default"}, sub); err != nil {
+		t.Fatalf("expected coder Sub-Run %q: %v", subName, err)
+	}
+	if got := sub.Annotations[annCoverageFloor]; got != "7850" {
+		t.Errorf("coverage-floor annotation = %q, want 7850", got)
+	}
+}
+
+// TestReconcile_CoverageFloorNotSetWhenDisabled verifies that no coverage-floor
+// annotation is set when CoveragePolicy is not enabled.
+func TestReconcile_CoverageFloorNotSetWhenDisabled(t *testing.T) {
+	run := &v1alpha1.Run{
+		ObjectMeta: metav1.ObjectMeta{Name: "cov-2", Namespace: "default"},
+		Spec: v1alpha1.RunSpec{
+			ProjectRef:  "test-proj",
+			WorkflowRef: "test-workflow",
+		},
+	}
+	r, cl := newTestOrchestrationReconciler(t, run)
+
+	// No CoveragePolicy set — default is nil (disabled).
+
+	mustReconcile(t, ctx, r, ctrl.Request{NamespacedName: types.NamespacedName{Name: "cov-2", Namespace: "default"}})
+
+	subName := subRunName("cov-2", "coder-r1")
+	sub := &v1alpha1.Run{}
+	if err := cl.Get(ctx, types.NamespacedName{Name: subName, Namespace: "default"}, sub); err != nil {
+		t.Fatalf("expected coder Sub-Run %q: %v", subName, err)
+	}
+	if _, ok := sub.Annotations[annCoverageFloor]; ok {
+		t.Errorf("coverage-floor annotation should not be set when CoveragePolicy is disabled")
+	}
+}
+
+// TestReconcile_CoverageFloorRatcheting verifies that on the first successful
+// gate with CoveragePolicy enabled and floor 0, the controller sets the floor
+// to MinimumFloor.
+func TestReconcile_CoverageFloorRatcheting(t *testing.T) {
+	run := &v1alpha1.Run{
+		ObjectMeta: metav1.ObjectMeta{Name: "cov-3", Namespace: "default"},
+		Spec: v1alpha1.RunSpec{
+			ProjectRef:  "test-proj",
+			WorkflowRef: "test-workflow",
+		},
+	}
+	r, cl := newTestOrchestrationReconciler(t, run)
+
+	// Enable CoveragePolicy with MinimumFloor=6000, but leave floor at 0.
+	setProjectCoveragePolicy(t, cl,
+		types.NamespacedName{Name: "test-proj", Namespace: "default"},
+		&v1alpha1.CoveragePolicy{Enabled: true, MinimumFloor: 6000, RatchetMargin: 200},
+		0)
+
+	key := types.NamespacedName{Name: "cov-3", Namespace: "default"}
+	projKey := types.NamespacedName{Name: "test-proj", Namespace: "default"}
+
+	// coder succeeds → gating → ratcheting.
+	mustReconcile(t, ctx, r, ctrl.Request{NamespacedName: key})
+	setRunStatusPhase(t, cl, types.NamespacedName{Name: subRunName("cov-3", "coder-r1"), Namespace: "default"}, v1alpha1.RunPhaseSucceeded)
+	mustReconcile(t, ctx, r, ctrl.Request{NamespacedName: key})
+
+	// The project's CoverageFloor should now be MinimumFloor.
+	updated := &v1alpha1.Project{}
+	if err := cl.Get(ctx, projKey, updated); err != nil {
+		t.Fatalf("get project: %v", err)
+	}
+	if updated.Status.CoverageFloor != 6000 {
+		t.Errorf("CoverageFloor = %d, want 6000 (MinimumFloor)", updated.Status.CoverageFloor)
+	}
+}

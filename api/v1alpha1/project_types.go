@@ -52,10 +52,55 @@ type ProjectSpec struct {
 	// carries dagmar-git-creds to read its own now-private module.
 	// +optional
 	GitCredentialsRef *GitCredentialsRef `json:"gitCredentialsRef,omitempty"`
+
+	// CoveragePolicy controls test-coverage ratcheting in the quality gate (dagmar-4154).
+	// When enabled, dagmar-gate measures total go test coverage and compares it against the
+	// ratcheted floor (Project.Status.CoverageFloor). Coverage below the floor → gate RED.
+	// The controller ratchets the floor upward after each green gate: newFloor = max(floor,
+	// coverage - RatchetMargin), clamped to MinimumFloor. This creates continuously increasing
+	// coverage pressure without manual threshold bumps.
+	// +optional
+	CoveragePolicy *CoveragePolicy `json:"coveragePolicy,omitempty"`
+}
+
+// CoveragePolicy defines the coverage-ratcheting policy for a Project (dagmar-4154).
+// The policy is operator-set (CRD spec); the actual ratcheted floor is controller-managed
+// (CRD status). The gate function receives the floor as a parameter and enforces it.
+//
+// All coverage values are expressed in basis points (0–10000), where 7850 = 78.50%.
+// This avoids float64 in CRD schemas (which kubebuilder discourages for cross-language
+// portability).
+type CoveragePolicy struct {
+	// Enabled activates coverage-ratcheting in the quality gate. When false (default),
+	// coverage is not checked.
+	// +optional
+	Enabled bool `json:"enabled,omitempty"`
+
+	// MinimumFloor is the absolute lower bound for the coverage floor (basis points, 0–10000).
+	// The ratcheted floor (Status.CoverageFloor) never drops below this value, even if actual
+	// coverage is lower. This prevents a bad commit from permanently lowering the bar.
+	// Default 0 (= 0.00%) when unset.
+	// +optional
+	// +kubebuilder:default=0
+	MinimumFloor int `json:"minimumFloor,omitempty"`
+
+	// RatchetMargin is the margin below actual coverage that the floor tracks (basis points).
+	// After a green gate, the controller sets newFloor = max(currentFloor, coverage - RatchetMargin).
+	// A larger margin gives more slack; a smaller margin ratchets tighter.
+	// Default 200 (= 2.00%) when unset.
+	// +optional
+	// +kubebuilder:default=200
+	RatchetMargin int `json:"ratchetMargin,omitempty"`
 }
 
 // ProjectStatus holds the observed state of a Project. Minimal in Phase 0.
 type ProjectStatus struct {
+	// CoverageFloor is the current ratcheted coverage floor (basis points, 0–10000).
+	// Controller-managed: after each green gate with coverage measurement, the controller
+	// ratchets this value upward (dagmar-4154). Never drops below CoveragePolicy.MinimumFloor.
+	// +optional
+	CoverageFloor int `json:"coverageFloor,omitempty"`
+
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
 }

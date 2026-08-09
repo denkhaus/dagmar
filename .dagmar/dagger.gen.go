@@ -233,7 +233,14 @@ func invoke(ctx context.Context, parentJSON []byte, parentName string, fnName st
 					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg githubToken", err))
 				}
 			}
-			return (*Dagmar).DagmarGate(&parent, ctx, source, githubToken)
+			var coverageFloorBps int
+			if inputArgs["coverageFloorBps"] != nil {
+				err = json.Unmarshal([]byte(inputArgs["coverageFloorBps"]), &coverageFloorBps)
+				if err != nil {
+					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg coverageFloorBps", err))
+				}
+			}
+			return (*Dagmar).DagmarGate(&parent, ctx, source, githubToken, coverageFloorBps)
 		default:
 			return nil, fmt.Errorf("unknown function %s", fnName)
 		}

@@ -44,7 +44,7 @@ func newTestReconciler(t *testing.T, run *v1alpha1.Run) (*RunReconciler, client.
 	}
 	cl := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithStatusSubresource(&v1alpha1.Run{}).
+		WithStatusSubresource(&v1alpha1.Run{}, &v1alpha1.Project{}).
 		WithObjects(project, enginePod, run).
 		Build()
 	return &RunReconciler{Client: cl, Scheme: scheme}, cl
@@ -157,7 +157,7 @@ func TestReconcile_EmptyModuleRefIsTerminalFailed(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "dagmar-own", Namespace: "default"},
 		Spec:       v1alpha1.ProjectSpec{Repo: "x"},
 	}
-	cl := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&v1alpha1.Run{}).WithObjects(project, run).Build()
+	cl := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&v1alpha1.Run{}, &v1alpha1.Project{}).WithObjects(project, run).Build()
 	r := &RunReconciler{Client: cl, Scheme: scheme}
 
 	res, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Name: "no-mod", Namespace: "default"}})
@@ -194,7 +194,7 @@ func TestReconcile_NeitherModuleFunctionNorWorkflowRefIsTerminalFailed(t *testin
 		ObjectMeta: metav1.ObjectMeta{Name: "dagmar-own", Namespace: "default"},
 		Spec:       v1alpha1.ProjectSpec{Repo: "x", ModuleRef: testModuleRef},
 	}
-	cl := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&v1alpha1.Run{}).WithObjects(project, run).Build()
+	cl := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&v1alpha1.Run{}, &v1alpha1.Project{}).WithObjects(project, run).Build()
 	r := &RunReconciler{Client: cl, Scheme: scheme}
 
 	res, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Name: "no-fn", Namespace: "default"}})
@@ -228,7 +228,7 @@ func TestReconcile_EngineNotReadyRequeues(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "eng", Namespace: engineNamespace, Labels: map[string]string{engineLabelKey: engineLabelVal}},
 		Status:     corev1.PodStatus{Phase: corev1.PodPending},
 	}
-	cl := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&v1alpha1.Run{}).WithObjects(project, enginePod, run).Build()
+	cl := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&v1alpha1.Run{}, &v1alpha1.Project{}).WithObjects(project, enginePod, run).Build()
 	r := &RunReconciler{Client: cl, Scheme: scheme}
 
 	res, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Name: "early", Namespace: "default"}})
@@ -261,7 +261,7 @@ func TestReconcile_GitCredentialsRefProjectsPATAndHelper(t *testing.T) {
 		Status:     corev1.PodStatus{Phase: corev1.PodRunning},
 	}
 	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "dagmar-git-creds", Namespace: "default"}}
-	cl := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&v1alpha1.Run{}).
+	cl := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&v1alpha1.Run{}, &v1alpha1.Project{}).
 		WithObjects(project, enginePod, run, secret).Build()
 	r := &RunReconciler{Client: cl, Scheme: scheme}
 	ctx := context.Background()
@@ -320,7 +320,7 @@ func TestReconcile_MissingGitCredentialsSecretIsTerminalFailed(t *testing.T) {
 		},
 	}
 	// No Secret "missing-creds" is seeded.
-	cl := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&v1alpha1.Run{}).WithObjects(project, run).Build()
+	cl := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&v1alpha1.Run{}, &v1alpha1.Project{}).WithObjects(project, run).Build()
 	r := &RunReconciler{Client: cl, Scheme: scheme}
 
 	res, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Name: "nocred", Namespace: "default"}})

@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"strconv"
 	"strings"
 
 	"dagger/dagmar-project/internal/dagger"
@@ -24,7 +25,11 @@ import (
 // AND in-loop (coder self-verification, Phase 2). The manifest parser is the PUBLISHED platform
 // contract (github.com/denkhaus/dagmar/manifest, ADR-0014 GAP-1 resolved by dagmar-a1e0) — both
 // the platform (.dagger) and this project module depend on it by versioned require.
-func Gate(ctx context.Context, source *dagger.Directory, githubToken *dagger.Secret) (string, error) {
+//
+// coverageFloorBps is the ratcheted coverage floor in basis points (0–10000, e.g. 7850 = 78.50%).
+// When > 0, the gate additionally runs `go test -coverprofile` in the root module and compares
+// total coverage against the floor (dagmar-4154). 0 = coverage check disabled.
+func Gate(ctx context.Context, source *dagger.Directory, githubToken *dagger.Secret, coverageFloorBps int) (string, error) {
 	raw, err := source.File(".dagmar/project.yaml").Contents(ctx)
 	if err != nil {
 		return "", fmt.Errorf("dagmar-gate: read .dagmar/project.yaml: %w", err)
@@ -35,6 +40,7 @@ func Gate(ctx context.Context, source *dagger.Directory, githubToken *dagger.Sec
 	}
 
 	var summaries []string
+	totalChecks := len(pm.Checkables)
 	for _, c := range pm.Checkables {
 		out, exit, err := runCheckable(ctx, source, c, githubToken)
 		if err != nil {
@@ -45,10 +51,99 @@ func Gate(ctx context.Context, source *dagger.Directory, githubToken *dagger.Sec
 			return "", fmt.Errorf("dagmar-gate: checkable %q FAILED (exit %d)\n--- output ---\n%s",
 				c.Name, exit, strings.TrimSpace(out))
 		}
-		summaries = append(summaries, fmt.Sprintf("  ✓ %s", c.Name))
+		summaries = append(summaries, fmt.Sprintf("  \u2713 %s", c.Name))
 	}
+
+	// Coverage check (dagmar-4154): when a floor is set, measure total go test coverage and
+	// compare it against the ratcheted floor. The floor is expressed in basis points (0–10000)
+	// to avoid float64 in CRD schemas.
+	if coverageFloorBps > 0 {
+		coverageBps, err := runCoverageCheck(ctx, source, githubToken, coverageFloorBps)
+		if err != nil {
+			return "", err
+		}
+		summaries = append(summaries,
+			fmt.Sprintf("  \u2713 coverage: %s (floor: %s)",
+				formatBps(coverageBps), formatBps(coverageFloorBps)))
+		totalChecks++
+	}
+
 	return fmt.Sprintf("dagmar-gate: all %d checkable(s) passed\n%s",
-		len(pm.Checkables), strings.Join(summaries, "\n")), nil
+		totalChecks, strings.Join(summaries, "\n")), nil
+}
+
+// runCoverageCheck runs `go test -coverprofile=coverage.out ./...` in the root module (reusing
+// the same mise-bootstrapped container), parses total coverage from `go tool cover -func`, and
+// returns it in basis points. If measured coverage is below the floor, the gate goes RED.
+func runCoverageCheck(ctx context.Context, source *dagger.Directory, githubToken *dagger.Secret, floorBps int) (int, error) {
+	ctr := bootstrapBase(source, githubToken).WithWorkdir("/src")
+
+	// Run tests with coverage in the root module. Merge stderr→stdout and capture exit code
+	// (same DAGMAR_EXIT pattern as runCheckable). A non-zero exit means the tests themselves
+	// failed — the coverage gate cannot proceed.
+	cmd := `exec 2>&1; go test -coverprofile=coverage.out ./...; echo "DAGMAR_EXIT=$?"`
+	out, err := ctr.WithExec([]string{"sh", "-c", cmd},
+		dagger.ContainerWithExecOpts{Expect: dagger.ReturnTypeAny}).Stdout(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("dagmar-gate: coverage: go test: %w", err)
+	}
+	if exit := parseDagmarExit(out); exit != 0 {
+		return 0, fmt.Errorf("dagmar-gate: coverage: go test FAILED (exit %d)\n--- output ---\n%s",
+			exit, strings.TrimSpace(out))
+	}
+
+	// Parse the total coverage from `go tool cover -func=coverage.out`. The last line is:
+	//   total:		(statements)	82.3%
+	coverOut, err := ctr.WithExec([]string{"sh", "-c", "go tool cover -func=coverage.out"}).Stdout(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("dagmar-gate: coverage: go tool cover: %w", err)
+	}
+	coverageBps, ok := parseCoverTotal(coverOut)
+	if !ok {
+		return 0, fmt.Errorf("dagmar-gate: coverage: could not parse total from `go tool cover`:\n%s",
+			strings.TrimSpace(coverOut))
+	}
+
+	if coverageBps < floorBps {
+		return 0, fmt.Errorf("dagmar-gate: coverage BELOW floor: %s < %s",
+			formatBps(coverageBps), formatBps(floorBps))
+	}
+	return coverageBps, nil
+}
+
+// parseCoverTotal extracts the total coverage percentage from `go tool cover -func` output and
+// returns it as basis points (int, 0–10000). The total line has the form:
+//
+//	total:		(statements)	82.3%
+//
+// Returns (bps, true) on success, (0, false) if no total line was found.
+func parseCoverTotal(coverOut string) (int, bool) {
+	lines := strings.Split(coverOut, "\n")
+	// The total line is always the last non-empty line starting with "total:".
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if !strings.HasPrefix(line, "total:") {
+			continue
+		}
+		// Extract the trailing percentage: everything after the last tab.
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		pctStr := strings.TrimSuffix(fields[len(fields)-1], "%")
+		pct, err := strconv.ParseFloat(pctStr, 64)
+		if err != nil {
+			continue
+		}
+		bps := int(pct*100 + 0.5) // round to nearest basis point
+		return bps, true
+	}
+	return 0, false
+}
+
+// formatBps converts basis points (7850) to a human-readable percentage string ("78.50%").
+func formatBps(bps int) string {
+	return fmt.Sprintf("%.2f%%", float64(bps)/100)
 }
 
 // runCheckable runs one checkable in a golang container and returns (stdout, exitCode, err).

@@ -175,12 +175,21 @@ func (r *RunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	var prompterModel string
 	var prompterMaxAPICalls int
 	var prompterPhase string
+	// coverageFloorBps is read from the Sub-Run annotation set by the orchestrator
+	// when CoveragePolicy is enabled (dagmar-4154). The agent pod passes
+	// --coverage-floor-bps to `dagger call dagmar-gate` during self-verification.
+	var coverageFloorBps int
 	if run.Spec.ParentRun != "" && run.Annotations != nil {
 		if v, ok := run.Annotations[annPrompterPhase]; ok {
 			prompterPhase = v
 			prompterModel = run.Annotations[annPrompterModel]
 			if n, err := strconv.Atoi(run.Annotations[annPrompterMaxAPICalls]); err == nil {
 				prompterMaxAPICalls = n
+			}
+		}
+		if v, ok := run.Annotations[annCoverageFloor]; ok {
+			if n, err := strconv.Atoi(v); err == nil {
+				coverageFloorBps = n
 			}
 		}
 	}
@@ -207,7 +216,7 @@ func (r *RunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		return ctrl.Result{}, err
 	}
 	pod, err := r.ensureAgentPod(ctx, run, project, enginePod, agentModel, agentMaxAPICalls,
-		prompterModel, prompterMaxAPICalls, prompterPhase)
+		prompterModel, prompterMaxAPICalls, prompterPhase, coverageFloorBps)
 	if err != nil {
 		logger.Error(err, "ensure agent pod", "run", req.NamespacedName)
 		return ctrl.Result{}, err
@@ -294,7 +303,7 @@ func (r *RunReconciler) ensureAgentIdentity(ctx context.Context, run *v1alpha1.R
 }
 
 // ensureAgentPod creates the agent pod if it does not yet exist and returns it.
-func (r *RunReconciler) ensureAgentPod(ctx context.Context, run *v1alpha1.Run, project *v1alpha1.Project, enginePod string, agentModel string, agentMaxAPICalls int, prompterModel string, prompterMaxAPICalls int, prompterPhase string) (*corev1.Pod, error) {
+func (r *RunReconciler) ensureAgentPod(ctx context.Context, run *v1alpha1.Run, project *v1alpha1.Project, enginePod string, agentModel string, agentMaxAPICalls int, prompterModel string, prompterMaxAPICalls int, prompterPhase string, coverageFloorBps int) (*corev1.Pod, error) {
 	podName := agentPodName(run.Name)
 	pod := &corev1.Pod{}
 	err := r.Get(ctx, types.NamespacedName{Name: podName, Namespace: run.Namespace}, pod)
@@ -305,7 +314,7 @@ func (r *RunReconciler) ensureAgentPod(ctx context.Context, run *v1alpha1.Run, p
 		return nil, err
 	}
 	newPod := agentPodFor(run, project, enginePod, podName, agentModel, agentMaxAPICalls,
-		prompterModel, prompterMaxAPICalls, prompterPhase)
+		prompterModel, prompterMaxAPICalls, prompterPhase, coverageFloorBps)
 	if err := ctrl.SetControllerReference(run, newPod, r.Scheme); err != nil {
 		return nil, fmt.Errorf("set controller reference: %w", err)
 	}
@@ -320,7 +329,7 @@ func (r *RunReconciler) ensureAgentPod(ctx context.Context, run *v1alpha1.Run, p
 // runs as the per-namespace dagmar-agent SA (granted pods/exec on the engine) and uses in-cluster
 // auth for the kubectl exec the runner host performs — no kubeconfig mount (unlike the cbb8 Probe
 // client, which ran outside the cluster).
-func agentPodFor(run *v1alpha1.Run, project *v1alpha1.Project, enginePod, podName string, agentModel string, agentMaxAPICalls int, prompterModel string, prompterMaxAPICalls int, prompterPhase string) *corev1.Pod {
+func agentPodFor(run *v1alpha1.Run, project *v1alpha1.Project, enginePod, podName string, agentModel string, agentMaxAPICalls int, prompterModel string, prompterMaxAPICalls int, prompterPhase string, coverageFloorBps int) *corev1.Pod {
 	image := defaultAgentPodImage
 	if project.Spec.AgentPodImage != "" {
 		image = project.Spec.AgentPodImage
@@ -384,11 +393,21 @@ func agentPodFor(run *v1alpha1.Run, project *v1alpha1.Project, enginePod, podNam
 			fnArgs = append(fnArgs, "--max-apicalls", fmt.Sprintf("%d", agentMaxAPICalls))
 		}
 	}
+	// Coverage gate call (dagmar-4154): when a coverage floor is set on the Sub-Run,
+	// append `dagger call dagmar-gate --source /workspace --coverage-floor-bps <n>`
+	// after the coder step. The gate runs inside the pod as self-verification; the
+	// controller's gate evaluation (advanceGating) still relies on pod success/failure.
+	gateCall := ""
+	if coverageFloorBps > 0 {
+		gateCall = fmt.Sprintf(
+			` && dagger call -m %s dagmar-gate --source /workspace --coverage-floor-bps %d`,
+			project.Spec.ModuleRef, coverageFloorBps)
+	}
 	cmd := fmt.Sprintf(
 		`apk add --no-cache %s && `+
 			preCall+
 			`curl -fsSL https://github.com/dagger/dagger/releases/download/v%s/dagger_v%s_linux_amd64.tar.gz | tar xz -C /usr/local/bin dagger && `+
-			`dagger call -m %s %s %s`,
+			`dagger call -m %s %s %s`+gateCall,
 		apkPkgs, daggerVersion, daggerVersion, project.Spec.ModuleRef, run.Spec.ModuleFunction, shellJoin(fnArgs),
 	)
 	env := []corev1.EnvVar{

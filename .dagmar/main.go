@@ -55,6 +55,12 @@ func (m *Dagmar) DagmarGate(
 	// Pass via `--github-token env:GITHUB_TOKEN` (dagger reads from the local environment as a Secret).
 	// +optional
 	githubToken *dagger.Secret,
+	// coverageFloorBps is the ratcheted coverage floor in basis points (0–10000, e.g. 7850 = 78.50%).
+	// When > 0, the gate measures total go test coverage and fails if below the floor (dagmar-4154).
+	// 0 = coverage check disabled.
+	// +optional
+	// +default=0
+	coverageFloorBps int,
 ) (string, error) {
-	return workflows.Gate(ctx, source, githubToken)
+	return workflows.Gate(ctx, source, githubToken, coverageFloorBps)
 }
