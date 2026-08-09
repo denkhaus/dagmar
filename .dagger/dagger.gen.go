@@ -212,6 +212,62 @@ func invoke(ctx context.Context, parentJSON []byte, parentName string, fnName st
 	switch parentName {
 	case "Dagmar":
 		switch fnName {
+		case "Adjudicate":
+			var parent Dagmar
+			err = json.Unmarshal(parentJSON, &parent)
+			if err != nil {
+				panic(fmt.Errorf("%s: %w", "failed to unmarshal parent object", err))
+			}
+			var source *dagger.Directory
+			if inputArgs["source"] != nil {
+				err = json.Unmarshal([]byte(inputArgs["source"]), &source)
+				if err != nil {
+					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg source", err))
+				}
+			}
+			var gateResult string
+			if inputArgs["gateResult"] != nil {
+				err = json.Unmarshal([]byte(inputArgs["gateResult"]), &gateResult)
+				if err != nil {
+					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg gateResult", err))
+				}
+			}
+			var reviewResult string
+			if inputArgs["reviewResult"] != nil {
+				err = json.Unmarshal([]byte(inputArgs["reviewResult"]), &reviewResult)
+				if err != nil {
+					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg reviewResult", err))
+				}
+			}
+			var taskContext string
+			if inputArgs["taskContext"] != nil {
+				err = json.Unmarshal([]byte(inputArgs["taskContext"]), &taskContext)
+				if err != nil {
+					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg taskContext", err))
+				}
+			}
+			var model string
+			if inputArgs["model"] != nil {
+				err = json.Unmarshal([]byte(inputArgs["model"]), &model)
+				if err != nil {
+					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg model", err))
+				}
+			}
+			var maxApicalls int
+			if inputArgs["maxAPICalls"] != nil {
+				err = json.Unmarshal([]byte(inputArgs["maxAPICalls"]), &maxApicalls)
+				if err != nil {
+					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg maxAPICalls", err))
+				}
+			}
+			var moduleRef string
+			if inputArgs["moduleRef"] != nil {
+				err = json.Unmarshal([]byte(inputArgs["moduleRef"]), &moduleRef)
+				if err != nil {
+					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg moduleRef", err))
+				}
+			}
+			return (*Dagmar).Adjudicate(&parent, ctx, source, gateResult, reviewResult, taskContext, model, maxApicalls, moduleRef)
 		case "Code":
 			var parent Dagmar
 			err = json.Unmarshal(parentJSON, &parent)

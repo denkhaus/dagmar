@@ -163,6 +163,62 @@ func (m *Dagmar) Prompt(
 	return app.Prompt(ctx, src, phase, taskContext, model, maxAPICalls, moduleRef)
 }
 
+// Adjudicate is dagmar's adjudicator-loop entry point (ADR-0023 D4). When the deterministic
+// Gate and the Reviewer-LLM disagree (gate green + reviewer veto, or gate red + reviewer
+// approve), the Adjudicator resolves the conflict — it is the final automated decision maker
+// before human escalation.
+//
+// The Adjudicator is read-only: it reads source, issues, and memory to investigate the
+// disagreement, but modifies nothing. It returns a structured verdict string naming one of
+// three resolution paths: reviewer-wrong (calibrate reviewer, proceed), gate-wrong (coder
+// repairs the gate checkables, full re-run), or escalate (unresolvable, human needed).
+//
+// Unlike Prompt/Code, the Adjudicator does NOT use a chained prompter — its instructions come
+// directly from the adjudicator meta-prompt (prompts.AdjudicatorMetaPrompt). The controller
+// dispatches this via `dagger call -m .dagger adjudicate --source <dir> ...`. Delegates to
+// app.Adjudicate.
+//
+// The args are primitives + Dagger types because Dagger codegen requires main-package types
+// only. The app layer builds the read-only Env, sends the meta-prompt + disagreement context,
+// and drives the Loop (ADR-0010 §3: Tier A direct).
+func (m *Dagmar) Adjudicate(
+	ctx context.Context,
+	// source is the project source directory (read-only). The Adjudicator reads files
+	// from here to investigate the root cause of the disagreement.
+	source *dagger.Directory,
+	// gateResult is the gate's outcome: "green" or "red" plus which checkables failed
+	// (if red) and their failure messages.
+	gateResult string,
+	// reviewResult is the reviewer's outcome: "approve" or "veto" plus the reviewer's
+	// rationale.
+	reviewResult string,
+	// taskContext is the original issue text / task description the coder was asked
+	// to implement.
+	taskContext string,
+	// model is the LLM model identifier (e.g. "anthropic/claude-sonnet-4").
+	// The Adjudicator needs strong reasoning (ADR-0023 D6).
+	// +optional
+	// +default="anthropic/claude-sonnet-4"
+	model string,
+	// maxAPICalls bounds the LLM API calls for this adjudication Run. Higher than the
+	// prompter (adjudication may require deeper investigation of source + issues).
+	// +optional
+	// +default=30
+	maxAPICalls int,
+	// moduleRef is the project module reference (the Project CR's moduleRef).
+	// Registers dagmar-issues + dagmar-memory as LLM-Tool hooks via WithMainModule.
+	// Defaults to ".dagmar" (dagmar dogfooding itself).
+	// +optional
+	// +default=".dagmar"
+	moduleRef string,
+) (string, error) {
+	src := source
+	if src == nil {
+		src = m.Project
+	}
+	return app.Adjudicate(ctx, src, gateResult, reviewResult, taskContext, model, maxAPICalls, moduleRef)
+}
+
 // Diff computes the difference between a pre-Loop and post-Loop workspace (ADR-0021 D8).
 // The controller calls this after Code() to extract the agent's changes for the PR flow
 // (ADR-0020 D3). Returns a Directory containing only the changed files.
