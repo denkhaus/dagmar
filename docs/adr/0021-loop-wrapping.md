@@ -88,18 +88,30 @@ K8s. The controller's job is to dispatch the function call; the function builds 
 arguments. This is the ADR-0010 §3 pattern: Tier A used directly in `app/`.
 
 ```go
-// app/code.go (sketch)
+// app/code.go (proven — dagmar-9571, empirically validated 2026-08-09)
 func Code(ctx context.Context, source *dagger.Directory, promptFile *dagger.File,
     model string, maxAPICalls int, moduleRef string) (*dagger.Directory, error) {
 
     client := dagger.Connect()
-    // 1. Build the Env: workspace + project module tools
-    projectMod := client.ModuleSource(moduleRef).AsModule().Sync(ctx)
-    env := client.Env().
-        WithWorkspace(source).
-        WithMainModule(projectMod)  // registers LLM-Tool hooks (dagmar-issues/memory/prompt)
+    // 1. Build the Env: Privileged + Writable + directory I/O bindings.
+    //    Privileged=true grants the LLM core API access (Directory, File, Container) —
+    //    without it, the agent sees only DeclareOutput + ReadLogs (no file tools).
+    //    Writable=true allows the agent to Save outputs.
+    //    See ADR-0022 for the full rationale + hermeticity analysis.
+    env := client.Env(dagger.EnvOpts{
+        Privileged: true,
+        Writable:   true,
+    }).
+        WithDirectoryInput("source", source, "The project source directory").
+        WithDirectoryOutput("result", "The modified source directory")
 
-    // 2. Build the LLM
+    // 2. Optionally register the project module's LLM-Tool hooks (ADR-0019)
+    if moduleRef != "" {
+        projectMod := client.ModuleSource(moduleRef).AsModule().Sync(ctx)
+        env = env.WithMainModule(projectMod)
+    }
+
+    // 3. Build the LLM
     llm := client.LLM(dagger.LLMOpts{
         Model:       model,
         MaxAPICalls: maxAPICalls,
@@ -107,18 +119,17 @@ func Code(ctx context.Context, source *dagger.Directory, promptFile *dagger.File
         WithEnv(env).
         WithPromptFile(promptFile)
 
-    // 3. Block on the Loop — the agent works until done or budget exhausted
-    llm = llm.Loop()                  // register the loop (lazy)
-    llm, err = llm.Sync(ctx)          // force evaluation — blocks until the agent is done
-    if err != nil {
+    // 4. Block on the Loop — the agent works until done or budget exhausted
+    llm = llm.Loop()
+    if _, err := llm.Sync(ctx); err != nil {
         return nil, fmt.Errorf("code: loop failed: %w", err)
     }
 
-    // 4. Token usage (cost accounting — captured here, not by the controller)
-    _, _ = llm.TokenUsage().TotalTokens(ctx)  // Phase 2: write to Run output
+    // 5. Token usage (cost accounting — captured here, not by the controller)
+    _, _ = llm.TokenUsage().TotalTokens(ctx)
 
-    // 5. Return the modified workspace
-    return source, nil
+    // 6. Return the modified workspace from the "result" output binding
+    return env.Output("result").AsDirectory(), nil
 }
 ```
 
@@ -196,21 +207,29 @@ The LLM can call `env.Checks().Run()` during the Loop to self-verify (ADR-0009: 
 in-loop self-verification"). The check results appear in the LLM's tool output, and the agent can
 iterate if checks fail.
 
-### D7 — Hermeticity: WithMainModule + excluded tools, not network isolation
+### D7 — Hermeticity: Privileged Env + tool-set policy (revised post-cognition-proof)
 
-Per ADR-0011 §2, hermeticity is a **tool-surface constraint**. The `code` function's Env includes
-`WithMainModule(projectModule)` (registers the LLM-Tool hooks — dagmar-issues/memory/prompt). The
-default Env tools are curated by the module. Network-capable tools (`http`, `git` remote,
-container exec) are NOT on the Env by default — they must be explicitly added.
+> **Revised 2026-08-09 (Review 29 D1/E2):** the cognition proof (dagmar-9571) empirically showed
+> that `EnvOpts{Privileged: true}` is **required** for the LLM to access file tools
+> (Directory, File, Container). Without it, the agent sees only `DeclareOutput` + `ReadLogs` —
+> no file read/write. `Privileged` grants "core API including host access" (v0.21.8 SDK doc),
+> which is broader than ADR-0011's tool-exclusion model anticipated. ADR-0022 reconciles this
+> tension; the interim position is documented here.
 
-If a specific Agent role needs a network-capable tool (e.g. a researcher agent that can fetch
-URLs), the controller passes a flag, and the `code` function conditionally adds tools. This is
-ADR-0011's model: tool-set exclusion is the primary control; the residual network access from raw
-container exec is the accepted risk (ProbeNet finding).
+The Env is constructed with `Privileged: true` (the agent gets core Dagger API access). The
+hermeticity constraint (ADR-0011) is enforced via **tool-set policy**, not via the Env constructor:
+the project module's functions are registered via `WithMainModule(projectModule)` (the LLM-Tool
+hooks — dagmar-issues/memory/prompt). Network-capable tools (`http`, `git` remote, container exec)
+are NOT added to the Env by default.
 
-For Phase 2 v1, all coder Runs are hermetic: `WithMainModule(projectModule)` only, no network tools. The
-agent works on the workspace, calls hooks for issues/memory/prompts, and self-verifies via
-`env.Checks()`.
+The residual risk is that `Privileged` grants **host access** — a capability ADR-0011's
+tool-exclusion model does not cover. This is the accepted interim risk for Phase 2 v1, documented
+in ADR-0022. The agent works on the workspace directory (input/output bindings, not host mounts),
+calls hooks for issues/memory/prompts, and the Loop runs inside the Dagger engine sandbox.
+
+For Phase 2 v1, all coder Runs use the Privileged Env without network tools. `ToolSetPolicy`
+(`agent_types.go`) is defined but NOT YET READ by the controller — it will control whether
+network-capable tools are added when networked agent roles are needed (Phase 3).
 
 ### D8 — Post-Loop: Code returns the modified workspace Directory
 
@@ -225,13 +244,12 @@ module:
 // Diff extracts the changes from a post-Loop workspace vs. the pre-Loop baseline.
 func (m *Dagmar) Diff(
     ctx context.Context,
-    // before is the pre-Loop workspace (the original clone).
-    before *dagger.Directory,
     // after is the post-Loop workspace (Code's return value).
     after *dagger.Directory,
+    // before is the pre-Loop workspace (the original clone).
+    before *dagger.Directory,
 ) *dagger.Directory {
 	return app.Diff(after, before)
-}
 }
 ```
 
@@ -244,7 +262,7 @@ design principle is that cost accounting is captured inside the function, not by
 
 ## Consequences
 
-- **Two methods on `.dagger` platform module:** `Code(source, promptFile, model, maxAPICalls) → *dagger.Directory`
+- **Two methods on `.dagger` platform module:** `Code(source, promptFile, model, maxAPICalls, moduleRef) → (*dagger.Directory, error)`
   and `Diff(after, before) → *dagger.Directory`. The Phase-0 dispatch pattern
   (`dagger call -m <ref> <fn>`) extends naturally — both are just functions.
 - **Env is execution-plane, not control-plane:** the K8s controller cannot construct Dagger SDK
@@ -257,7 +275,8 @@ design principle is that cost accounting is captured inside the function, not by
   The function receives a ready `.md` file.
 - **Checkable is env.Checks():** the project module's check functions, discovered natively by
   the Env. No manual gate invocation inside the Loop.
-- **Hermetic by default:** `WithMainModule(projectModule)` only; network tools excluded (ADR-0011).
+- **Privileged Env + tool-set policy:** `EnvOpts{Privileged: true}` is required for file access
+  (ADR-0022); hermeticity enforced via tool-set exclusion, not Env constructor (ADR-0011, revised D7).
 - **Agent CRD needed (Phase 2):** carries model, prompt refs, maxAPICalls, tool-set policy.
 
 ## Alternatives considered

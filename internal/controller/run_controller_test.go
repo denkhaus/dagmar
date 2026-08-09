@@ -488,10 +488,3 @@ func assertContains(t *testing.T, s, substr string) {
 		t.Errorf("expected command to contain %q, got: %s", substr, s[:min(len(s), 200)])
 	}
 }
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}

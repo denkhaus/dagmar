@@ -39,16 +39,20 @@ function in the Project module. See ADR-0001; ADR-0018 (Tier-B redefined).
 - **LLM** — Dagger's LLM primitive (`dag.LLM()`); the cognition provider. dagmar does
   not reimplement cognition.
 - **Env** — Dagger environment bundling inputs/outputs/tools for an LLM (`dag.Env()`).
-  Construction: `env.WithWorkspace(source).WithMainModule(projectModule)` (workspace + LLM-Tool
-  hooks from the project's `.dagmar/` module, ADR-0021 D2). Built inside the `.dagger` module's
-  `code` function, not by the controller (Tier-A direct in app/, ADR-0010 §3). Hermetic by
-  default (project module tools only; network tools excluded, ADR-0011).
+  Construction: `Env(EnvOpts{Privileged: true, Writable: true}).WithDirectoryInput("source", dir).WithDirectoryOutput("result")`
+  (proven pattern, ADR-0021 D2 revised, ADR-0022). `Privileged` grants core API access (Directory,
+  File, Container); `Writable` allows the agent to `Save` outputs. Optionally `.WithMainModule(projectModule)`
+  registers the project's LLM-Tool hooks (ADR-0019). Built inside the `.dagger` module's `code`
+  function, not by the controller (Tier-A direct in app/, ADR-0010 §3). Hermeticity enforced via
+  tool-set policy, not Env constructor (ADR-0011, revised ADR-0021 D7).
 - **Workspace** — the project source as a `*dagger.Directory`, passed to the agent's
-  `Env` via `env.WithWorkspace(source)`. The checkable (in-loop self-verification) is
-  `env.Checks()` — module-annotated check functions discovered by the Env, not a constructor
-  argument. Post-Loop changes captured via `workspace.Update()` → `*Changeset`.
-  (ADR-0020: `CodeWorkspace(source, checkable)` was a pre-API conceptual design; v0.21.8 uses
-  `Env.WithWorkspace` + `Env.Checks`.)
+  Env via `WithDirectoryInput("source", dir)`. The agent reads files, modifies via
+  `Directory.withNewFile` etc., and saves the result via the `Save` tool to the "result"
+  output binding (`WithDirectoryOutput("result")`). Post-Loop, the controller reads
+  `env.Output("result").AsDirectory()` to get the modified workspace. In-loop
+  self-verification runs via `env.Checks()` when module check functions are registered.
+  (ADR-0020: `CodeWorkspace(source, checkable)` was a pre-API conceptual design; v0.21.8
+  uses `Env.WithDirectoryInput` + `Env.WithDirectoryOutput`. See ADR-0022.)
 - **checkable** — the project's mechanical self-verification (build/test/lint), defined
   per-project **in code** inside the `dagmar-gate` Dagger function (ADR-0017 §3; formerly
   manifest-declared per ADR-0003, superseded). In v0.21.8, in-loop self-verification runs via
@@ -62,9 +66,10 @@ function in the Project module. See ADR-0001; ADR-0018 (Tier-B redefined).
   `llm.TokenUsage()` for cost accounting. Prompt is pre-composed by the controller
   (ADR-0005 merge); the function receives a ready `.md` file.
 - **TokenUsage** — Dagger's cost observability (`llm.TokenUsage()` → `*LLMTokenUsage`).
-- **Changeset** — Dagger's diff representation. Two paths: `Workspace.Update()` →
-  `*Changeset` (provides `.AsPatch()`, `.Before()`, `.After()`, `.DiffStats()`); and
-  `Directory.Diff(other)` → `*Directory` (v0.21.8: Diff returns `*Directory`, not `*Changeset`).
+- **Changeset** — Dagger's diff representation. Two paths: `env.Output("result").AsDirectory()`
+  → `*Directory` (the modified workspace, proven pattern ADR-0022); and `Directory.Diff(other)`
+  → `*Directory` (v0.21.8: Diff returns `*Directory`, not `*Changeset`). The `.Diff()` function
+  on the platform module computes `after.Diff(before)` to extract changes for the PR flow.
   Tier-A.
 - **Tool** — Dagger configuration: what an agent may call (`dag.git` / `container` /
   `http` plus Project Hook Service exposures). dagmar coins no Tool type; an Agent's
@@ -146,10 +151,11 @@ dogfooding).
   resource-bounded pod + engine-session an Agent process runs in. `1 Run : 1 Sandbox`.
 - **Workspace** — a task-scoped, Run-isolated clone of a Project on a branch
   (`dagmar/<run-name>`); handed to the agent's Env as a `*dagger.Directory` via
-  `env.WithWorkspace(source)`. Ephemeral (engine git-fetch cache, no persistent volume,
+  `WithDirectoryInput("source", dir)`. Ephemeral (engine git-fetch cache, no persistent volume,
   ADR-0020 D1). Strict isolation per Run (no shared clone); lineage via git branches
-  (Run-out → next Run-in from branch head). Post-Loop: `workspace.Update()` → `*Changeset`
-  → controller pushes branch + creates PR (agents never hold push authority, ADR-0006/0007).
+  (Run-out → next Run-in from branch head). Post-Loop: `env.Output("result").AsDirectory()`
+  → controller dispatches `Diff(after, before)` → pushes branch + creates PR
+  (agents never hold push authority, ADR-0006/0007).
 
 **In-repo manifest (not a CRD):**
 
