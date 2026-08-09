@@ -9,6 +9,7 @@ import (
 
 	"github.com/denkhaus/dagmar/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/utils/ptr"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -324,6 +325,11 @@ func (r *RunReconciler) ensureAgentPod(ctx context.Context, run *v1alpha1.Run, p
 	return newPod, nil
 }
 
+// llmSecretName is the fixed name of the LLM credentials Secret (per-namespace convention).
+// The agent pod injects this Secret's keys (OPENAI_API_KEY, OPENAI_BASE_URL, ANTHROPIC_API_KEY)
+// as env vars so the Dagger engine can access the LLM API without interactive prompting.
+const llmSecretName = "dagger-llm-config"
+
 // agentPodFor builds the agent pod. It installs kubectl + the dagger CLI and runs
 // `dagger call -m <ModuleRef> <fn> <args>` against the singleton engine via kube-pod://. The pod
 // runs as the per-namespace dagmar-agent SA (granted pods/exec on the engine) and uses in-cluster
@@ -421,6 +427,22 @@ func agentPodFor(run *v1alpha1.Run, project *v1alpha1.Project, enginePod, podNam
 	)
 	env := []corev1.EnvVar{
 		{Name: "_EXPERIMENTAL_DAGGER_RUNNER_HOST", Value: runnerHost},
+	}
+	// Inject LLM provider credentials. The agent pod's `dagger call` passes these to
+	// the engine. Without them, the engine prompts interactively for an API key — which
+	// fails in a non-interactive pod. Uses Optional: true so missing keys are silently
+	// skipped (the secret may not exist in all namespaces).
+	for _, key := range []string{"OPENAI_API_KEY", "OPENAI_BASE_URL", "ANTHROPIC_API_KEY"} {
+		env = append(env, corev1.EnvVar{
+			Name: key,
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: llmSecretName},
+					Key:                  key,
+					Optional:             ptr.To(true),
+				},
+			},
+		})
 	}
 	if ref := project.Spec.GitCredentialsRef; ref != nil {
 		key := ref.Key
