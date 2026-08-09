@@ -48,10 +48,21 @@ spec:
               pipeline form (gate → review → merge with revise loop) is hardcoded in the controller.
               The Workflow carries the metadata the controller needs to orchestrate Sub-Runs.
             properties:
+              adjudicatorAgentRef:
+                description: |-
+                  AdjudicatorAgentRef names the Agent used for the adjudicator role (ADR-0023 D7).
+                  Optional: when absent, gate↔reviewer disagreement escalates directly to a human.
+                type: string
               coderAgentRef:
                 description: |-
                   CoderAgentRef names the Agent (in the Workflow's namespace) used for the coder role.
                   The controller reads this Agent's spec to configure the code() function call.
+                type: string
+              prompterAgentRef:
+                description: |-
+                  PrompterAgentRef names the Agent used for the prompter role (ADR-0023 D7). The
+                  controller reads this Agent's spec to configure the prompt() call (model,
+                  maxAPICalls) that synthesizes tailored prompts at runtime.
                 type: string
               qualityGateRef:
                 description: |-
@@ -72,6 +83,7 @@ spec:
                 type: string
             required:
             - coderAgentRef
+            - prompterAgentRef
             - qualityGateRef
             type: object
         type: object

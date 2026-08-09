@@ -14,10 +14,21 @@ type WorkflowSpec struct {
 	// +kubebuilder:validation:Required
 	CoderAgentRef string `json:"coderAgentRef"`
 
+	// PrompterAgentRef names the Agent used for the prompter role (ADR-0023 D7). The
+	// controller reads this Agent's spec to configure the prompt() call (model,
+	// maxAPICalls) that synthesizes tailored prompts at runtime.
+	// +kubebuilder:validation:Required
+	PrompterAgentRef string `json:"prompterAgentRef"`
+
 	// ReviewerAgentRef names the Agent used for the review role. Optional: if unset,
 	// the workflow runs without review (gate-only, for non-merge workflows).
 	// +optional
 	ReviewerAgentRef string `json:"reviewerAgentRef,omitempty"`
+
+	// AdjudicatorAgentRef names the Agent used for the adjudicator role (ADR-0023 D7).
+	// Optional: when absent, gate↔reviewer disagreement escalates directly to a human.
+	// +optional
+	AdjudicatorAgentRef string `json:"adjudicatorAgentRef,omitempty"`
 
 	// QualityGateRef names the QualityGate that gates advancement. The controller
 	// evaluates gate-green between pipeline stages.
