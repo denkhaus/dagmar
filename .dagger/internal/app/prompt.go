@@ -8,7 +8,7 @@ import (
 	"context"
 	"fmt"
 
-	"dagger/dagmar/internal/prompts"
+	"github.com/denkhaus/dagmar/manifest"
 
 	"dagger/dagmar/internal/dagger"
 )
@@ -50,7 +50,7 @@ func Prompt(
 ) (string, error) {
 	// 1. Select the meta-prompt by phase (ADR-0023 D9).
 	//    "pre-code" → coder-meta.md, "pre-review" → reviewer-meta.md.
-	metaPrompt := prompts.MetaPromptForPhase(phase)
+	metaPrompt := manifest.MetaPromptForPhase(phase)
 	if metaPrompt == "" {
 		return "", fmt.Errorf("prompt: unknown phase %q (want \"pre-code\" or \"pre-review\")", phase)
 	}

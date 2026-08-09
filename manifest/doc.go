@@ -1,4 +1,11 @@
-// Package manifest is dagmar's PUBLISHED platform manifest contract — the schema + parser for the
+// Package manifest is dagmar's PUBLISHED shared contract module — types shared across all Go
+// modules (root, .dagger, .dagmar, manifest). Contains: the manifest schema + parser (ADR-0003),
+// the GateResult JSON contract (dagmar-481f), and the meta-prompt constants (ADR-0023 D9).
+//
+// This package IS the single source of truth for cross-module types. Every module that needs
+// GateResult, CheckResult, or meta-prompts imports from here — no duplication.
+//
+// Original purpose: the schema + parser for the
 // in-repo conformance contract each Project exposes at .dagmar/project.yaml (ADR-0003).
 //
 // Authority: platform, by construction. This package IS the contract (analogous to the Project

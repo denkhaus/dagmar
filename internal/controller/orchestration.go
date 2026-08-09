@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/denkhaus/dagmar/api/v1alpha1"
+	"github.com/denkhaus/dagmar/manifest"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -463,19 +464,11 @@ func coverageFloorFor(project *v1alpha1.Project) int {
 	return project.Spec.CoveragePolicy.MinimumFloor
 }
 
-// gateResultJSON is the controller-side struct for parsing the GateResult JSON contract
-// (.dagmar/internal/workflows/gate.go). Only the fields the controller needs.
-type gateResultJSON struct {
-	Passed      bool `json:"passed"`
-	CoverageBps int  `json:"coverage_bps"`
-	FloorBps    int  `json:"floor_bps"`
-}
-
 // readGateResult reads the coder pod's termination message and parses it as a GateResult JSON.
 // The pod writes the gate output to /dev/termination-log (K8s surfaces it as
 // pod.Status.ContainerStatuses[0].State.Terminated.Message). Returns an error if the pod has
 // not terminated or the message is empty/unparseable.
-func (r *RunReconciler) readGateResult(ctx context.Context, podName, namespace string) (*gateResultJSON, error) {
+func (r *RunReconciler) readGateResult(ctx context.Context, podName, namespace string) (*manifest.GateResult, error) {
 	pod := &corev1.Pod{}
 	if err := r.Get(ctx, types.NamespacedName{Name: podName, Namespace: namespace}, pod); err != nil {
 		return nil, fmt.Errorf("read gate result: get pod %q: %w", podName, err)
@@ -491,7 +484,7 @@ func (r *RunReconciler) readGateResult(ctx context.Context, podName, namespace s
 	if msg == "" {
 		return nil, fmt.Errorf("termination message empty")
 	}
-	var result gateResultJSON
+	var result manifest.GateResult
 	if err := json.Unmarshal([]byte(msg), &result); err != nil {
 		return nil, fmt.Errorf("parse gate JSON: %w (message: %s)", err, msg[:min(len(msg), 200)])
 	}

@@ -9,26 +9,8 @@ import (
 	"strings"
 
 	"dagger/dagmar-project/internal/dagger"
+	"github.com/denkhaus/dagmar/manifest"
 )
-
-// GateResult is the standardized JSON contract for dagmar-gate output. Every project's
-// dagmar-gate function MUST return a JSON string matching this structure. The controller
-// parses it from the pod's termination log; CI parses it from stdout. The gate NEVER returns
-// an error — failures are represented as {"passed": false} with check details.
-type GateResult struct {
-	Passed      bool          `json:"passed"`
-	Checks      []CheckResult `json:"checks"`
-	CoverageBps int           `json:"coverage_bps,omitempty"` // total coverage in basis points (0-10000), 0 if not measured
-	FloorBps    int           `json:"floor_bps,omitempty"`   // coverage floor that was enforced, 0 if not checked
-}
-
-// CheckResult is the per-check outcome inside a GateResult.
-type CheckResult struct {
-	Name   string `json:"name"`
-	Passed bool   `json:"passed"`
-	// Output contains failure details when Passed is false (truncated for termination log).
-	Output string `json:"output,omitempty"`
-}
 
 // checkable is a hard-coded gate check (ADR-0017 §3: checkables are Go code, NOT YAML).
 type checkable struct {
@@ -54,13 +36,13 @@ var gateChecks = []checkable{
 // The JSON output is the contract: it flows to the pod's /dev/termination-log, where the
 // controller reads pod.Status.ContainerStatuses[0].State.Terminated.Message.
 func Gate(ctx context.Context, source *dagger.Directory, githubToken *dagger.Secret, coverageFloorBps int) (string, error) {
-	result := GateResult{Passed: true}
+	result := manifest.GateResult{Passed: true}
 
 	for _, c := range gateChecks {
 		out, exit, err := runCheck(ctx, source, githubToken, c)
 		if err != nil {
 			result.Passed = false
-			result.Checks = append(result.Checks, CheckResult{
+			result.Checks = append(result.Checks, manifest.CheckResult{
 				Name: c.name, Passed: false,
 				Output: fmt.Sprintf("execution error: %v", err),
 			})
@@ -68,13 +50,13 @@ func Gate(ctx context.Context, source *dagger.Directory, githubToken *dagger.Sec
 		}
 		if exit != 0 {
 			result.Passed = false
-			result.Checks = append(result.Checks, CheckResult{
+			result.Checks = append(result.Checks, manifest.CheckResult{
 				Name: c.name, Passed: false,
 				Output: truncateForTerminationLog(out),
 			})
 			return marshalGate(result)
 		}
-		result.Checks = append(result.Checks, CheckResult{Name: c.name, Passed: true})
+		result.Checks = append(result.Checks, manifest.CheckResult{Name: c.name, Passed: true})
 	}
 
 	// Coverage check (dagmar-4154).
@@ -84,7 +66,7 @@ func Gate(ctx context.Context, source *dagger.Directory, githubToken *dagger.Sec
 			result.Passed = false
 			result.CoverageBps = 0
 			result.FloorBps = coverageFloorBps
-			result.Checks = append(result.Checks, CheckResult{
+			result.Checks = append(result.Checks, manifest.CheckResult{
 				Name: "coverage", Passed: false,
 				Output: truncateForTerminationLog(err.Error()),
 			})
@@ -92,14 +74,14 @@ func Gate(ctx context.Context, source *dagger.Directory, githubToken *dagger.Sec
 		}
 		result.CoverageBps = coverageBps
 		result.FloorBps = coverageFloorBps
-		result.Checks = append(result.Checks, CheckResult{Name: "coverage", Passed: true})
+		result.Checks = append(result.Checks, manifest.CheckResult{Name: "coverage", Passed: true})
 	}
 
 	return marshalGate(result)
 }
 
 // marshalGate serializes a GateResult to JSON. Never returns an error (the struct is simple).
-func marshalGate(r GateResult) (string, error) {
+func marshalGate(r manifest.GateResult) (string, error) {
 	b, err := json.Marshal(r)
 	if err != nil {
 		return `{"passed":false,"checks":[{"name":"marshal","passed":false,"output":"json marshal failed"}]}`, nil
