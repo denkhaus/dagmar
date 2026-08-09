@@ -436,3 +436,61 @@ func fetchRun(t *testing.T, cl client.Client, key types.NamespacedName) *v1alpha
 	}
 	return run
 }
+
+func TestReconcile_CognitionRunInjectsWorkspaceAndPrompt(t *testing.T) {
+	run := &v1alpha1.Run{
+		ObjectMeta: metav1.ObjectMeta{Name: "cog-1", Namespace: "default"},
+		Spec: v1alpha1.RunSpec{
+			ProjectRef:     "dagmar-own",
+			AgentRef:       "coder-agent",
+			ModuleFunction: "code",
+		},
+	}
+	r, cl := newTestReconciler(t, run)
+
+	// Create the Agent.
+	agent := &v1alpha1.Agent{
+		ObjectMeta: metav1.ObjectMeta{Name: "coder-agent", Namespace: "default"},
+		Spec: v1alpha1.AgentSpec{
+			Model:       "test-model",
+			MaxAPICalls: 50,
+			Prompt:      v1alpha1.PromptRef{ProjectPrompt: "coder-prompt"},
+		},
+	}
+	if err := cl.Create(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	mustReconcile(t, ctx, r, ctrl.Request{NamespacedName: types.NamespacedName{Name: "cog-1", Namespace: "default"}})
+
+	// The pod should exist with the cognition-specific command.
+	pod := &corev1.Pod{}
+	if err := cl.Get(ctx, types.NamespacedName{Name: agentPodName("cog-1"), Namespace: "default"}, pod); err != nil {
+		t.Fatalf("get pod: %v", err)
+	}
+	cmd := pod.Spec.Containers[0].Command[2]
+	// Should contain workspace clone + prompt + code() args.
+	assertContains(t, cmd, "git clone")
+	assertContains(t, cmd, "/workspace")
+	assertContains(t, cmd, "/tmp/prompt.md")
+	assertContains(t, cmd, "coder-prompt")
+	assertContains(t, cmd, "--model")
+	assertContains(t, cmd, "test-model")
+	assertContains(t, cmd, "--max-api-calls")
+	assertContains(t, cmd, "50")
+	assertContains(t, cmd, "--module-ref")
+}
+
+func assertContains(t *testing.T, s, substr string) {
+	t.Helper()
+	if !strings.Contains(s, substr) {
+		t.Errorf("expected command to contain %q, got: %s", substr, s[:min(len(s), 200)])
+	}
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}

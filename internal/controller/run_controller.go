@@ -153,6 +153,7 @@ func (r *RunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	// Agent is a terminal config error (like a missing Project).
 	var agentModel string
 	var agentMaxAPICalls int
+	var agentPrompt string
 	if run.Spec.AgentRef != "" {
 		agent := &v1alpha1.Agent{}
 		if err := r.Get(ctx, types.NamespacedName{Name: run.Spec.AgentRef, Namespace: run.Namespace}, agent); err != nil {
@@ -164,6 +165,7 @@ func (r *RunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		}
 		agentModel = agent.Spec.Model
 		agentMaxAPICalls = agent.Spec.MaxAPICalls
+		agentPrompt = agent.Spec.Prompt.ProjectPrompt
 	}
 
 	// 4. Resolve the singleton engine pod (a Ready one). Transiently absent (engine still rolling
@@ -187,7 +189,7 @@ func (r *RunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		logger.Error(err, "ensure agent identity", "run", req.NamespacedName)
 		return ctrl.Result{}, err
 	}
-	pod, err := r.ensureAgentPod(ctx, run, project, enginePod, agentModel, agentMaxAPICalls)
+	pod, err := r.ensureAgentPod(ctx, run, project, enginePod, agentModel, agentMaxAPICalls, agentPrompt)
 	if err != nil {
 		logger.Error(err, "ensure agent pod", "run", req.NamespacedName)
 		return ctrl.Result{}, err
@@ -274,7 +276,7 @@ func (r *RunReconciler) ensureAgentIdentity(ctx context.Context, run *v1alpha1.R
 }
 
 // ensureAgentPod creates the agent pod if it does not yet exist and returns it.
-func (r *RunReconciler) ensureAgentPod(ctx context.Context, run *v1alpha1.Run, project *v1alpha1.Project, enginePod string, agentModel string, agentMaxAPICalls int) (*corev1.Pod, error) {
+func (r *RunReconciler) ensureAgentPod(ctx context.Context, run *v1alpha1.Run, project *v1alpha1.Project, enginePod string, agentModel string, agentMaxAPICalls int, agentPrompt string) (*corev1.Pod, error) {
 	podName := agentPodName(run.Name)
 	pod := &corev1.Pod{}
 	err := r.Get(ctx, types.NamespacedName{Name: podName, Namespace: run.Namespace}, pod)
@@ -284,7 +286,7 @@ func (r *RunReconciler) ensureAgentPod(ctx context.Context, run *v1alpha1.Run, p
 	if !errors.IsNotFound(err) {
 		return nil, err
 	}
-	newPod := agentPodFor(run, project, enginePod, podName, agentModel, agentMaxAPICalls)
+	newPod := agentPodFor(run, project, enginePod, podName, agentModel, agentMaxAPICalls, agentPrompt)
 	if err := ctrl.SetControllerReference(run, newPod, r.Scheme); err != nil {
 		return nil, fmt.Errorf("set controller reference: %w", err)
 	}
@@ -299,7 +301,7 @@ func (r *RunReconciler) ensureAgentPod(ctx context.Context, run *v1alpha1.Run, p
 // runs as the per-namespace dagmar-agent SA (granted pods/exec on the engine) and uses in-cluster
 // auth for the kubectl exec the runner host performs — no kubeconfig mount (unlike the cbb8 Probe
 // client, which ran outside the cluster).
-func agentPodFor(run *v1alpha1.Run, project *v1alpha1.Project, enginePod, podName string, agentModel string, agentMaxAPICalls int) *corev1.Pod {
+func agentPodFor(run *v1alpha1.Run, project *v1alpha1.Project, enginePod, podName string, agentModel string, agentMaxAPICalls int, agentPrompt string) *corev1.Pod {
 	image := defaultAgentPodImage
 	if project.Spec.AgentPodImage != "" {
 		image = project.Spec.AgentPodImage
@@ -328,11 +330,25 @@ func agentPodFor(run *v1alpha1.Run, project *v1alpha1.Project, enginePod, podNam
 		// expands only when the helper runs at credential-fill time (inheriting the pod env).
 		preCall = `git config --global credential.helper '!f() { echo username=dagmar; echo password="$DAGMAR_GIT_PAT"; }; f' && `
 	}
-	// Build the module function + args. When an AgentRef is present, inject the
-	// agent's model and maxAPICalls as CLI flags to the code() function.
+	// Build the module function + args.
 	fnArgs := run.Spec.ModuleArgs
 	if agentModel != "" {
-		fnArgs = append(fnArgs, "--model", agentModel)
+		// Cognition Run (AgentRef set): clone workspace + write prompt + inject code() args.
+		// The workspace clone (ADR-0020 D1) is an ephemeral git clone into /workspace.
+		// The prompt file is a minimal stub for now — full ADR-0005 cross-store merge is
+		// deferred. The project prompt name from the AgentSpec is written as the prompt
+		// content placeholder until canopy composition is wired.
+		preCall += fmt.Sprintf(
+			`git clone %s /workspace && `+
+				`echo "You are a coding agent. Project prompt: %s" > /tmp/prompt.md && `,
+			project.Spec.Repo, agentPrompt,
+		)
+		fnArgs = append(fnArgs,
+			"--source", "/workspace",
+			"--prompt-file", "/tmp/prompt.md",
+			"--module-ref", project.Spec.ModuleRef,
+			"--model", agentModel,
+		)
 		if agentMaxAPICalls > 0 {
 			fnArgs = append(fnArgs, "--max-api-calls", fmt.Sprintf("%d", agentMaxAPICalls))
 		}
