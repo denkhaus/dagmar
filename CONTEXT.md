@@ -63,8 +63,8 @@ function in the Project module. See ADR-0001; ADR-0018 (Tier-B redefined).
   cognition loop (v0.21.8: `LLMOpts{Model, MaxAPICalls}`). A Run drives exactly one Loop
   (ADR-0021). Multi-step tasks = controller orchestration of multiple Sub-Runs (ADR-0016),
   each driving one Loop. Token budget = `MaxAPICalls` (engine-enforced hard stop);
-  `llm.TokenUsage()` for cost accounting. Prompt is pre-composed by the controller
-  (ADR-0005 merge); the function receives a ready `.md` file.
+  `llm.TokenUsage()` for cost accounting. The prompt is synthesized at runtime by the
+  Prompter-LLM (ADR-0023); the function receives a ready `.md` file.
 - **TokenUsage** — Dagger's cost observability (`llm.TokenUsage()` → `*LLMTokenUsage`).
 - **Changeset** — Dagger's diff representation. Two paths: `env.Output("result").AsDirectory()`
   → `*Directory` (the modified workspace, proven pattern ADR-0022); and `Directory.Diff(other)`
@@ -86,15 +86,12 @@ dogfooding).
   issues (= Tasks). Backed by seeds (`sd`) in the project module; vendor-agnostic (ADR-0017/0019).
 - **dagmar-memory** (→ mulch) — the LLM-Tool hook for project expertise: read/search/write
   conventions, patterns, failures, decisions. Backed by mulch (`ml`) in the project module.
-- **dagmar-prompt** (→ canopy) — the LLM-Tool hook for on-demand project prompt rendering.
-  Supplements (not replaces) the ADR-0005 cross-store merge: the merge is controller-side
-  pre-Loop; the hook is a runtime LLM tool (ADR-0019 D3).
 
 ### Tier C — dagmar core
 
 **CRDs (declarative: definitions / policy / registration / observable execution):**
 
-> **CRD set** (ADR-0002, extended by ADR-0016): `{Project, Agent, Prompt, QualityGate, Trigger, Workflow, Run}`.
+> **CRD set** (ADR-0002, extended by ADR-0016; Prompt removed by ADR-0023 D8): `{Project, Agent, QualityGate, Trigger, Workflow, Run}`.
 
 - **Project** (CRD) — a registered, repo-backed repository dagmar operates on (own
   repo or fork). Carries **dagmar-operational config only** (Project Hook binding,
@@ -105,14 +102,10 @@ dogfooding).
   (checkable logic, Project Hook implementations) lives in the project module's code,
   not on the CR.
 - **Agent** (CRD) — a durable role/persona (coder, reviewer, researcher, …): model +
-  Prompt ref + tool-set + checkable + role bounds. Materialized as Runs. Agents have
-  **no merge authority** — merge is a deterministic controller function (ADR-0006); the
+  maxAPICalls + tool-set policy. The prompt is no longer part of the Agent spec — it is
+  synthesized at runtime by the Prompter-LLM (ADR-0023 D1/D8). Materialized as Runs. Agents
+  have **no merge authority** — merge is a deterministic controller function (ADR-0006); the
   merge tool is in no Agent's tool-set.
-- **Prompt** (CRD) — a **reference to canopy prompts**, not a dagmar-invented spec: a
-  project-content prompt (in the project's `.canopy/`) plus dagmar operational mixins
-  (output-format / review-gating / safety / tool-rules, in dagmar's own canopy). dagmar
-  composes them at run time (Variant A, ADR-0005) into the final prompt passed to
-  `dag.LLM().WithPromptFile(...)`.
 - **QualityGate** (CRD) — the **deterministic** layer deciding whether a candidate may
   advance (checkables + rules). **Invariant** — always secures quality. Merge requires
   QualityGate.green **AND** ReviewAgent.approve (two green lights, ADR-0006); the
@@ -125,11 +118,11 @@ dogfooding).
   point. All Project Hooks are Go functions in the Project's `.dagmar/` Dagger module (ADR-0017).
   Two categories: **Programmatic hooks** (`dagmar-bootstrap`/`dagmar-gate`, called by dagmar's
   controller, take `source *dagger.Directory` + `githubToken *dagger.Secret`) and **LLM-Tool hooks**
-  (`dagmar-issues`/`dagmar-memory`/`dagmar-prompt`, exposed as tools on the agent's `Env`, take
+  (`dagmar-issues`/`dagmar-memory`, exposed as tools on the agent's `Env`, take
   only operation-specific params — workspace accessed implicitly via `dag.CurrentModule()`).
   Signatures + conformance check specified in ADR-0019. Vendor-agnostic: the function name is the
   contract, not the backing service. LLM-Tool hooks are mandatory when an LLM agent is involved
-  (noop-allowed). `dagmar-prompt` supplements (not replaces) ADR-0005's cross-store merge.
+  (noop-allowed). The `dagmar-prompt` hook is removed (ADR-0023 D8) — the Prompter-LLM replaces it.
 - **Workflow** (CRD) — a pipeline template referencing Dagger Go functions plus
   controller-interpreted orchestration metadata. **Not** a step DSL — the pipeline form
   (e.g., gate → review → merge with revise loop) is hardcoded in the controller per
@@ -169,8 +162,8 @@ dogfooding).
 
 - **ReviewAgent** — an Agent role that cognitively reviews another Run's output and
   holds a **hard veto**; co-equal gate with the QualityGate (merge needs both green,
-  ADR-0006). Prompt = dagmar `review-agent` mixin ⊕ project `review-calibration` mixin ⊕
-  project content (ADR-0005).
+  ADR-0006). The reviewer's prompt is synthesized by the Prompter-LLM (ADR-0023 D2,
+  pre-review phase).
 - **Calibration Agent** *(deferred)* — a non-gating LLM step that, on QualityGate ↔
   ReviewAgent disagreement, diagnoses the cause and emits project-specific
   `review-calibration` mixins into the project's canopy (ADR-0006).
@@ -221,8 +214,8 @@ dogfooding).
 
 ## CRD boundary
 
-CRDs: `{Project, Agent, Prompt, QualityGate, Trigger, Workflow, Run}` (Workflow added by
-ADR-0016). Non-CR: `{Task, Sandbox, Workspace, ProjectManifest}`. The boundary follows each
+CRDs: `{Project, Agent, QualityGate, Trigger, Workflow, Run}` (Workflow added by
+ADR-0016; Prompt removed by ADR-0023 D8). Non-CR: `{Task, Sandbox, Workspace, ProjectManifest}`. The boundary follows each
 entity's state property (declarative/reconciled → CR; canonical-elsewhere or runtime → not) —
 see **ADR-0002** for the full table and rationale (extended by ADR-0016 §7).
 
@@ -234,10 +227,11 @@ seeds `dagmar-3684`, Go module layout & hex arch):
 | Agent CRD field | Tier-A target |
 |-----------------|---------------|
 | `model` | `dag.LLM(LLMOpts{Model})` |
-| `prompt` ref → canopy resolve | `.WithPromptFile(...)` |
 | `tool-set` | tools on `dag.Env()` |
 | `checkable` | `env.Checks()` → `*CheckGroup` (v0.21.8; ADR-0020) |
 | `maxAPICalls` | `LLMOpts{MaxAPICalls}` (ADR-0021 D4) |
+
+> The prompt is no longer an Agent CRD field — it is synthesized by the Prompter-LLM (ADR-0023).
 
 ## Open questions (tracked, not yet decided)
 
@@ -249,7 +243,7 @@ See `docs/adr/`:
 - **ADR-0002** — Kubernetes CRD boundary
 - **ADR-0003** — Project conformance via in-repo ProjectManifest
 - **ADR-0004** — Execution topology (Hybrid-C)
-- **ADR-0005** — Prompt composition (dagmar-side cross-store merge, Variant A)
+- **ADR-0005** — Prompt composition (dagmar-side cross-store merge, Variant A) *(superseded by ADR-0023)*
 - **ADR-0006** — Autonomy model (slim axes, deterministic merge, two-green + veto)
 - **ADR-0007** — Credentials & secret management (per-Project namespace, typed secrets, ESO, projected injection)
 - **ADR-0008** — Engine tenancy & Run concurrency (singleton engine, kube-pod:// agent pods + RBAC, per-Project cache volumes)
@@ -263,6 +257,7 @@ See `docs/adr/`:
 - **ADR-0016** — Workflow-CRD framework (pipeline templates, dual-mode Run, controller-driven orchestration)
 - **ADR-0017** — Unified Project Hooks (everything is Dagger code; checkables move into dagmar-gate; LLM-Tool hooks)
 - **ADR-0018** — Go port/adapter layer removed; Project Hook Services are Dagger functions; Tracer/Span sole surviving port
-- **ADR-0019** — Project Hook function signatures + introspection conformance; dagmar-prompt supplements (not replaces) ADR-0005 merge
+- **ADR-0019** — Project Hook function signatures + introspection conformance *(dagmar-prompt hook removed by ADR-0023 D8)*
 - **ADR-0020** — Workspace & repository interaction model; ephemeral Directory clones, branch-based lineage, controller-side PR, env.Checks() as checkable
 - **ADR-0021** — Loop-wrapping; code() function, Env in app/, MaxAPICalls budget, multi-step = orchestration, pre-composed prompt
+- **ADR-0023** — Prompter-LLM dynamic prompt synthesis; replaces Prompt CRD + canopy cross-store merge (supersedes ADR-0005; removes dagmar-prompt hook)

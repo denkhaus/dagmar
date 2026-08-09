@@ -454,7 +454,6 @@ func TestReconcile_CognitionRunInjectsWorkspaceAndPrompt(t *testing.T) {
 		Spec: v1alpha1.AgentSpec{
 			Model:       "test-model",
 			MaxAPICalls: 50,
-			Prompt:      v1alpha1.PromptRef{ProjectPrompt: "coder-prompt"},
 		},
 	}
 	if err := cl.Create(ctx, agent); err != nil {
@@ -473,8 +472,6 @@ func TestReconcile_CognitionRunInjectsWorkspaceAndPrompt(t *testing.T) {
 	assertContains(t, cmd, "git clone")
 	assertContains(t, cmd, "/workspace")
 	assertContains(t, cmd, "/tmp/prompt.md")
-	assertContains(t, cmd, "cn render")
-	assertContains(t, cmd, "coder-prompt")
 	assertContains(t, cmd, "--model")
 	assertContains(t, cmd, "test-model")
 	assertContains(t, cmd, "--max-apicalls")

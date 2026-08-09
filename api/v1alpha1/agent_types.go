@@ -18,38 +18,16 @@ const (
 	ToolSetPolicyNetworked ToolSetPolicy = "networked"
 )
 
-// PromptRef references canopy prompt templates for cross-store composition (ADR-0005).
-// The controller resolves these at dispatch time: project prompt from the project's
-// .canopy/, dagmar mixins from dagmar's .canopy/, merged into the final .md
-// passed to the code() function's WithPromptFile.
-type PromptRef struct {
-	// ProjectPrompt is the canopy prompt name in the project's .canopy/ store.
-	// This is the project-content prompt (role/task/domain specifics).
-	// +kubebuilder:validation:Required
-	ProjectPrompt string `json:"projectPrompt"`
-
-	// DagmarMixins are canopy mixin names from dagmar's own .canopy/ store.
-	// These are operational mixins (output-format, review-gating, safety, tool-rules).
-	// At least one mixin is expected; dagmar controls the final composed output (ADR-0005).
-	// +optional
-	DagmarMixins []string `json:"dagmarMixins,omitempty"`
-}
-
 // AgentSpec defines a durable role/persona (coder, reviewer, researcher). An Agent is
 // materialized as Runs — it carries the LLM configuration the controller passes to the
 // code() function (ADR-0021 D1). Agents have no merge authority (ADR-0006); the merge tool
-// is in no Agent's tool-set.
+// is in no Agent's tool-set. The prompt is no longer part of the Agent spec — it is
+// synthesized at runtime by the Prompter-LLM (ADR-0023 D1/D8).
 type AgentSpec struct {
 	// Model is the LLM model identifier passed to dag.LLM(LLMOpts{Model}).
 	// Examples: "anthropic/claude-sonnet-4", "openai/gpt-4o".
 	// +kubebuilder:validation:Required
 	Model string `json:"model"`
-
-	// Prompt references canopy prompt templates for cross-store composition (ADR-0005).
-	// The controller resolves project prompt + dagmar mixins into the final .md
-	// before dispatching the code() function.
-	// +kubebuilder:validation:Required
-	Prompt PromptRef `json:"prompt"`
 
 	// MaxAPICalls bounds the LLM API calls per Run (ADR-0021 D4). Engine-enforced
 	// hard stop: when exhausted, the Loop terminates and the Run fails (gate RED).
@@ -78,9 +56,10 @@ type AgentStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:shortName=agent
 
-// Agent is a durable role/persona (coder, reviewer, researcher): model + prompt + budget +
+// Agent is a durable role/persona (coder, reviewer, researcher): model + budget +
 // tool-set policy. Materialized as Runs; the controller reads an Agent's spec to configure
 // the code() function (ADR-0021 D1). Agents have no merge authority (ADR-0006).
+// Prompt synthesis is handled by the Prompter-LLM (ADR-0023 D1/D8), not the Agent spec.
 type Agent struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

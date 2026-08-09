@@ -20,9 +20,10 @@ spec:
     schema:
       openAPIV3Schema:
         description: |-
-          Agent is a durable role/persona (coder, reviewer, researcher): model + prompt + budget +
+          Agent is a durable role/persona (coder, reviewer, researcher): model + budget +
           tool-set policy. Materialized as Runs; the controller reads an Agent's spec to configure
           the code() function (ADR-0021 D1). Agents have no merge authority (ADR-0006).
+          Prompt synthesis is handled by the Prompter-LLM (ADR-0023 D1/D8), not the Agent spec.
         properties:
           apiVersion:
             description: |-
@@ -46,7 +47,8 @@ spec:
               AgentSpec defines a durable role/persona (coder, reviewer, researcher). An Agent is
               materialized as Runs — it carries the LLM configuration the controller passes to the
               code() function (ADR-0021 D1). Agents have no merge authority (ADR-0006); the merge tool
-              is in no Agent's tool-set.
+              is in no Agent's tool-set. The prompt is no longer part of the Agent spec — it is
+              synthesized at runtime by the Prompter-LLM (ADR-0023 D1/D8).
             properties:
               maxAPICalls:
                 default: 100
@@ -60,37 +62,16 @@ spec:
                   Model is the LLM model identifier passed to dag.LLM(LLMOpts{Model}).
                   Examples: "anthropic/claude-sonnet-4", "openai/gpt-4o".
                 type: string
-              prompt:
-                description: |-
-                  Prompt references canopy prompt templates for cross-store composition (ADR-0005).
-                  The controller resolves project prompt + dagmar mixins into the final .md
-                  before dispatching the code() function.
-                properties:
-                  dagmarMixins:
-                    description: |-
-                      DagmarMixins are canopy mixin names from dagmar's own .canopy/ store.
-                      These are operational mixins (output-format, review-gating, safety, tool-rules).
-                      At least one mixin is expected; dagmar controls the final composed output (ADR-0005).
-                    items:
-                      type: string
-                    type: array
-                  projectPrompt:
-                    description: |-
-                      ProjectPrompt is the canopy prompt name in the project's .canopy/ store.
-                      This is the project-content prompt (role/task/domain specifics).
-                    type: string
-                required:
-                - projectPrompt
-                type: object
               toolSetPolicy:
                 default: hermetic
                 description: |-
                   ToolSetPolicy controls the network/tool surface on the Agent's Env (ADR-0011).
                   "hermetic" (default) excludes network-capable tools; "networked" allows them.
+                  Phase 2 incremental: not yet read by the controller; code() always uses
+                  WithMainModule (hermetic). Wired when networked agent roles are needed.
                 type: string
             required:
             - model
-            - prompt
             type: object
           status:
             description: |-

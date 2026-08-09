@@ -22,7 +22,6 @@ func newTestOrchestrationReconciler(t *testing.T, run *v1alpha1.Run) (*RunReconc
 		Spec: v1alpha1.AgentSpec{
 			Model:       "test-model",
 			MaxAPICalls: 50,
-			Prompt:      v1alpha1.PromptRef{ProjectPrompt: "coder"},
 		},
 	}
 	reviewerAgent := &v1alpha1.Agent{
@@ -30,7 +29,6 @@ func newTestOrchestrationReconciler(t *testing.T, run *v1alpha1.Run) (*RunReconc
 		Spec: v1alpha1.AgentSpec{
 			Model:       "test-model",
 			MaxAPICalls: 30,
-			Prompt:      v1alpha1.PromptRef{ProjectPrompt: "reviewer"},
 		},
 	}
 	wf := &v1alpha1.Workflow{
