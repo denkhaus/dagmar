@@ -85,8 +85,8 @@ func TestReconcile_CreatesAgentIdentityAndPod(t *testing.T) {
 	if pod.Spec.ServiceAccountName != agentSA {
 		t.Errorf("agent pod ServiceAccountName = %q, want %q", pod.Spec.ServiceAccountName, agentSA)
 	}
-	if cmd := pod.Spec.Containers[0].Command[2]; !strings.Contains(cmd, "dagger call -m "+testModuleRef+" probe-net") {
-		t.Errorf("agent pod command missing `dagger call -m %s probe-net`: %q", testModuleRef, cmd)
+	if cmd := pod.Spec.Containers[0].Command[2]; !strings.Contains(cmd, "dagger call --allow-llm all -m "+testModuleRef+" probe-net") {
+		t.Errorf("agent pod command missing `dagger call --allow-llm all -m %s probe-net`: %q", testModuleRef, cmd)
 	}
 	if env := pod.Spec.Containers[0].Env[0]; env.Name != "_EXPERIMENTAL_DAGGER_RUNNER_HOST" || !strings.Contains(env.Value, "dagger-engine-0") {
 		t.Errorf("runner host env = %+v, want kube-pod://dagger-engine-0…", env)
@@ -278,7 +278,7 @@ func TestReconcile_GitCredentialsRefProjectsPATAndHelper(t *testing.T) {
 		"apk add --no-cache kubectl curl git":            "git installed for the credential helper",
 		"git config --global credential.helper":          "headless git credential helper configured",
 		`echo password="$DAGMAR_GIT_PAT"`:                "helper emits the projected PAT (quoted)",
-		"dagger call -m " + testModuleRef + " probe-net": "module call still present",
+		"dagger call --allow-llm all -m " + testModuleRef + " probe-net": "module call still present",
 	} {
 		if !strings.Contains(cmd, want) {
 			t.Errorf("agent pod command missing %q (%s): %q", want, why, cmd)

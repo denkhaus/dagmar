@@ -380,7 +380,7 @@ func agentPodFor(run *v1alpha1.Run, project *v1alpha1.Project, enginePod, podNam
 		// to the coder/reviewer.
 		if prompterPhase != "" {
 			prompterCmd := fmt.Sprintf(
-				`dagger call -m %s prompt --source /workspace --phase %s --task-context '' --model %s`,
+				`dagger call --allow-llm all -m %s prompt --source /workspace --phase %s --task-context '' --model %s`,
 				project.Spec.ModuleRef, prompterPhase, prompterModel,
 			)
 			if prompterMaxAPICalls > 0 {
@@ -411,18 +411,18 @@ func agentPodFor(run *v1alpha1.Run, project *v1alpha1.Project, enginePod, podNam
 	if coverageFloorBps > 0 {
 		gateCall = fmt.Sprintf(
 			` export --path /workspace-result && `+
-				`dagger call -m /workspace-result/.dagmar dagmar-gate --source /workspace-result --coverage-floor-bps %d > /dev/termination-log`,
+				`dagger call --allow-llm all -m /workspace-result/.dagmar dagmar-gate --source /workspace-result --coverage-floor-bps %d > /dev/termination-log`,
 			coverageFloorBps,
 		)
 	} else {
 		gateCall = ` export --path /workspace-result && ` +
-			`dagger call -m /workspace-result/.dagmar dagmar-gate --source /workspace-result > /dev/termination-log`
+			`dagger call --allow-llm all -m /workspace-result/.dagmar dagmar-gate --source /workspace-result > /dev/termination-log`
 	}
 	cmd := fmt.Sprintf(
 		`apk add --no-cache %s && `+
 			`curl -fsSL https://github.com/dagger/dagger/releases/download/v%s/dagger_v%s_linux_amd64.tar.gz | tar xz -C /usr/local/bin dagger && `+
 			preCall+
-			`dagger call -m %s %s %s`+gateCall,
+			`dagger call --allow-llm all -m %s %s %s`+gateCall,
 		apkPkgs, daggerVersion, daggerVersion, project.Spec.ModuleRef, run.Spec.ModuleFunction, shellJoin(fnArgs),
 	)
 	env := []corev1.EnvVar{
@@ -432,7 +432,7 @@ func agentPodFor(run *v1alpha1.Run, project *v1alpha1.Project, enginePod, podNam
 	// the engine. Without them, the engine prompts interactively for an API key — which
 	// fails in a non-interactive pod. Uses Optional: true so missing keys are silently
 	// skipped (the secret may not exist in all namespaces).
-	for _, key := range []string{"OPENAI_API_KEY", "OPENAI_BASE_URL", "ANTHROPIC_API_KEY"} {
+	for _, key := range []string{"OPENAI_API_KEY", "OPENAI_BASE_URL", "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL"} {
 		env = append(env, corev1.EnvVar{
 			Name: key,
 			ValueFrom: &corev1.EnvVarSource{
