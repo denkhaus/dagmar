@@ -473,6 +473,7 @@ func TestReconcile_CognitionRunInjectsWorkspaceAndPrompt(t *testing.T) {
 	assertContains(t, cmd, "git clone")
 	assertContains(t, cmd, "/workspace")
 	assertContains(t, cmd, "/tmp/prompt.md")
+	assertContains(t, cmd, "cn render")
 	assertContains(t, cmd, "coder-prompt")
 	assertContains(t, cmd, "--model")
 	assertContains(t, cmd, "test-model")

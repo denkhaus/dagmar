@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/denkhaus/dagmar/api/v1alpha1"
+	"github.com/denkhaus/dagmar/internal/prompt"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -338,10 +339,11 @@ func agentPodFor(run *v1alpha1.Run, project *v1alpha1.Project, enginePod, podNam
 		// The prompt file is a minimal stub for now — full ADR-0005 cross-store merge is
 		// deferred. The project prompt name from the AgentSpec is written as the prompt
 		// content placeholder until canopy composition is wired.
+		composeCmd := prompt.ShellComposeCommand(agentPrompt, "/workspace", "/tmp/prompt.md")
 		preCall += fmt.Sprintf(
 			`git clone %s /workspace && `+
-				`echo "You are a coding agent. Project prompt: %s" > /tmp/prompt.md && `,
-			project.Spec.Repo, agentPrompt,
+				`%s && `,
+			project.Spec.Repo, composeCmd,
 		)
 		fnArgs = append(fnArgs,
 			"--source", "/workspace",
