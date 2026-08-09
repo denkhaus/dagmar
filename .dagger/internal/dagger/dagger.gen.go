@@ -263,9 +263,6 @@ type JSON string
 type JSONValueID string
 
 // A unique identifier for an object.
-type K3SID string
-
-// A unique identifier for an object.
 type LLMID string
 
 // A unique identifier for an object.
@@ -13138,16 +13135,6 @@ func (r *Query) LoadJSONValueFromID(id JSONValueID) *JSONValue {
 	q = q.Arg("id", id)
 
 	return &JSONValue{
-		query: q,
-	}
-}
-
-// Load a K3S from its ID.
-func (r *Query) LoadK3SFromID(id K3SID) *K3S {
-	q := r.query.Select("loadK3SFromID")
-	q = q.Arg("id", id)
-
-	return &K3S{
 		query: q,
 	}
 }

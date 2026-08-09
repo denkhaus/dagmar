@@ -4,12 +4,5 @@
   "sdk": {
     "source": "go"
   },
-  "dependencies": [
-    {
-      "name": "k3s",
-      "source": "github.com/marcosnils/daggerverse/k3s@k3s/v0.11.1",
-      "pin": "c07646d1bf7f6079dab47ba152c767e062aa0f58"
-    }
-  ],
   "source": ".dagger"
 }

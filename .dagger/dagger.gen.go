@@ -310,20 +310,6 @@ func invoke(ctx context.Context, parentJSON []byte, parentName string, fnName st
 				}
 			}
 			return (*Dagmar).Code(&parent, ctx, source, promptFile, model, maxApicalls, moduleRef)
-		case "DeployEngine":
-			var parent Dagmar
-			err = json.Unmarshal(parentJSON, &parent)
-			if err != nil {
-				panic(fmt.Errorf("%s: %w", "failed to unmarshal parent object", err))
-			}
-			var cluster string
-			if inputArgs["cluster"] != nil {
-				err = json.Unmarshal([]byte(inputArgs["cluster"]), &cluster)
-				if err != nil {
-					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg cluster", err))
-				}
-			}
-			return (*Dagmar).DeployEngine(&parent, ctx, cluster)
 		case "Diff":
 			var parent Dagmar
 			err = json.Unmarshal(parentJSON, &parent)
@@ -345,41 +331,6 @@ func invoke(ctx context.Context, parentJSON []byte, parentName string, fnName st
 				}
 			}
 			return (*Dagmar).Diff(&parent, ctx, after, before), nil
-		case "Probe":
-			var parent Dagmar
-			err = json.Unmarshal(parentJSON, &parent)
-			if err != nil {
-				panic(fmt.Errorf("%s: %w", "failed to unmarshal parent object", err))
-			}
-			var cluster string
-			if inputArgs["cluster"] != nil {
-				err = json.Unmarshal([]byte(inputArgs["cluster"]), &cluster)
-				if err != nil {
-					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg cluster", err))
-				}
-			}
-			return (*Dagmar).Probe(&parent, ctx, cluster)
-		case "ProbeCache":
-			var parent Dagmar
-			err = json.Unmarshal(parentJSON, &parent)
-			if err != nil {
-				panic(fmt.Errorf("%s: %w", "failed to unmarshal parent object", err))
-			}
-			var mode string
-			if inputArgs["mode"] != nil {
-				err = json.Unmarshal([]byte(inputArgs["mode"]), &mode)
-				if err != nil {
-					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg mode", err))
-				}
-			}
-			return (*Dagmar).ProbeCache(&parent, ctx, mode)
-		case "ProbeNet":
-			var parent Dagmar
-			err = json.Unmarshal(parentJSON, &parent)
-			if err != nil {
-				panic(fmt.Errorf("%s: %w", "failed to unmarshal parent object", err))
-			}
-			return (*Dagmar).ProbeNet(&parent, ctx)
 		case "Prompt":
 			var parent Dagmar
 			err = json.Unmarshal(parentJSON, &parent)
@@ -450,20 +401,6 @@ func invoke(ctx context.Context, parentJSON []byte, parentName string, fnName st
 				}
 			}
 			return (*Dagmar).Sandbox(&parent, image, workingDir)
-		case "Up":
-			var parent Dagmar
-			err = json.Unmarshal(parentJSON, &parent)
-			if err != nil {
-				panic(fmt.Errorf("%s: %w", "failed to unmarshal parent object", err))
-			}
-			var cluster string
-			if inputArgs["cluster"] != nil {
-				err = json.Unmarshal([]byte(inputArgs["cluster"]), &cluster)
-				if err != nil {
-					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg cluster", err))
-				}
-			}
-			return (*Dagmar).Up(&parent, ctx, cluster)
 		case "":
 			var parent Dagmar
 			err = json.Unmarshal(parentJSON, &parent)
