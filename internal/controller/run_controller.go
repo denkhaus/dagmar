@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -166,6 +167,24 @@ func (r *RunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		agentMaxAPICalls = agent.Spec.MaxAPICalls
 	}
 
+	// 3e. Resolve prompter configuration for Sub-Runs created by orchestration
+	// (ADR-0023 D3). The orchestration controller stores the prompter model,
+	// maxAPICalls, and phase as annotations on each coder/reviewer Sub-Run. The
+	// atomic-Run Reconcile path reads them here to chain the prompt() call into
+	// the Pod command (prompt→code in the same Pod).
+	var prompterModel string
+	var prompterMaxAPICalls int
+	var prompterPhase string
+	if run.Spec.ParentRun != "" && run.Annotations != nil {
+		if v, ok := run.Annotations[annPrompterPhase]; ok {
+			prompterPhase = v
+			prompterModel = run.Annotations[annPrompterModel]
+			if n, err := strconv.Atoi(run.Annotations[annPrompterMaxAPICalls]); err == nil {
+				prompterMaxAPICalls = n
+			}
+		}
+	}
+
 	// 4. Resolve the singleton engine pod (a Ready one). Transiently absent (engine still rolling
 	// out) → requeue, not terminal.
 	enginePod, err := r.enginePodName(ctx)
@@ -187,7 +206,8 @@ func (r *RunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		logger.Error(err, "ensure agent identity", "run", req.NamespacedName)
 		return ctrl.Result{}, err
 	}
-	pod, err := r.ensureAgentPod(ctx, run, project, enginePod, agentModel, agentMaxAPICalls)
+	pod, err := r.ensureAgentPod(ctx, run, project, enginePod, agentModel, agentMaxAPICalls,
+		prompterModel, prompterMaxAPICalls, prompterPhase)
 	if err != nil {
 		logger.Error(err, "ensure agent pod", "run", req.NamespacedName)
 		return ctrl.Result{}, err
@@ -274,7 +294,7 @@ func (r *RunReconciler) ensureAgentIdentity(ctx context.Context, run *v1alpha1.R
 }
 
 // ensureAgentPod creates the agent pod if it does not yet exist and returns it.
-func (r *RunReconciler) ensureAgentPod(ctx context.Context, run *v1alpha1.Run, project *v1alpha1.Project, enginePod string, agentModel string, agentMaxAPICalls int) (*corev1.Pod, error) {
+func (r *RunReconciler) ensureAgentPod(ctx context.Context, run *v1alpha1.Run, project *v1alpha1.Project, enginePod string, agentModel string, agentMaxAPICalls int, prompterModel string, prompterMaxAPICalls int, prompterPhase string) (*corev1.Pod, error) {
 	podName := agentPodName(run.Name)
 	pod := &corev1.Pod{}
 	err := r.Get(ctx, types.NamespacedName{Name: podName, Namespace: run.Namespace}, pod)
@@ -284,7 +304,8 @@ func (r *RunReconciler) ensureAgentPod(ctx context.Context, run *v1alpha1.Run, p
 	if !errors.IsNotFound(err) {
 		return nil, err
 	}
-	newPod := agentPodFor(run, project, enginePod, podName, agentModel, agentMaxAPICalls)
+	newPod := agentPodFor(run, project, enginePod, podName, agentModel, agentMaxAPICalls,
+		prompterModel, prompterMaxAPICalls, prompterPhase)
 	if err := ctrl.SetControllerReference(run, newPod, r.Scheme); err != nil {
 		return nil, fmt.Errorf("set controller reference: %w", err)
 	}
@@ -299,7 +320,7 @@ func (r *RunReconciler) ensureAgentPod(ctx context.Context, run *v1alpha1.Run, p
 // runs as the per-namespace dagmar-agent SA (granted pods/exec on the engine) and uses in-cluster
 // auth for the kubectl exec the runner host performs — no kubeconfig mount (unlike the cbb8 Probe
 // client, which ran outside the cluster).
-func agentPodFor(run *v1alpha1.Run, project *v1alpha1.Project, enginePod, podName string, agentModel string, agentMaxAPICalls int) *corev1.Pod {
+func agentPodFor(run *v1alpha1.Run, project *v1alpha1.Project, enginePod, podName string, agentModel string, agentMaxAPICalls int, prompterModel string, prompterMaxAPICalls int, prompterPhase string) *corev1.Pod {
 	image := defaultAgentPodImage
 	if project.Spec.AgentPodImage != "" {
 		image = project.Spec.AgentPodImage
@@ -333,14 +354,26 @@ func agentPodFor(run *v1alpha1.Run, project *v1alpha1.Project, enginePod, podNam
 	if agentModel != "" {
 		// Cognition Run (AgentRef set): clone workspace + inject code() args.
 		// The workspace clone (ADR-0020 D1) is an ephemeral git clone into /workspace.
-		// The prompt file is NOT composed here — ADR-0023 replaces the canopy cross-store
-		// merge with the Prompter-LLM, which synthesizes a tailored prompt in a chained
-		// prompt() call (separate ticket). The --prompt-file arg is retained so the
-		// chained prompt() → code() invocation flows naturally once wired.
 		preCall += fmt.Sprintf(
 			`git clone %s /workspace && `,
 			project.Spec.Repo,
 		)
+		// Chained prompter (ADR-0023 D3): the prompter synthesizes a tailored
+		// prompt in the same Pod, redirecting its string output to /tmp/prompt.md.
+		// The code() call then reads it via --prompt-file. No controller decision
+		// point between prompting and coding — the prompter's output flows directly
+		// to the coder/reviewer.
+		if prompterPhase != "" {
+			prompterCmd := fmt.Sprintf(
+				`dagger call -m %s prompt --source /workspace --phase %s --task-context '' --model %s`,
+				project.Spec.ModuleRef, prompterPhase, prompterModel,
+			)
+			if prompterMaxAPICalls > 0 {
+				prompterCmd += fmt.Sprintf(` --max-apicalls %d`, prompterMaxAPICalls)
+			}
+			prompterCmd += fmt.Sprintf(` --module-ref %s > /tmp/prompt.md && `, project.Spec.ModuleRef)
+			preCall += prompterCmd
+		}
 		fnArgs = append(fnArgs,
 			"--source", "/workspace",
 			"--prompt-file", "/tmp/prompt.md",

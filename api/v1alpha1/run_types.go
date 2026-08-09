@@ -84,9 +84,8 @@ type RunStatus struct {
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
 
-	// PipelinePhase tracks orchestration Run progress (ADR-0016 §3).
-	// Values: "coder" | "review" | "escalated" | "done".
-	// ("gate" is deferred -- gate evaluation happens on the coder workspace post-Loop.)
+	// PipelinePhase tracks orchestration Run progress (ADR-0023 D5).
+	// Values: "coding" | "gating" | "reviewing" | "adjudicating" | "escalated" | "done".
 	// Zero-valued on atomic Runs.
 	// +optional
 	PipelinePhase string `json:"pipelinePhase,omitempty"`
