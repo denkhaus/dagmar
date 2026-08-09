@@ -23,14 +23,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: dagmar-gate
+      - name: install dagger
         uses: dagger/dagger-for-github@v8.4.1
+        with:
+          version: "0.21.8"
+
+      - name: dagmar-gate
         env:
           # GitHub Actions exposes the token as a secret, not an env var; map it so dagger's
           # `env:GITHUB_TOKEN` address resolves it (dagmar-233c).
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          # Match the engine the module is built against (dagger.json engineVersion v0.21.8).
-          version: "0.21.8"
-          verb: call
-          args: -m .dagmar dagmar-gate --source . --github-token env:GITHUB_TOKEN
+        run: |
+          RESULT=$(dagger call -m .dagmar dagmar-gate --source . --github-token env:GITHUB_TOKEN)
+          echo "$RESULT"
+          echo "$RESULT" | jq -e '.passed == true' || (echo "::error::GATE FAILED" && exit 1)

@@ -393,15 +393,24 @@ func agentPodFor(run *v1alpha1.Run, project *v1alpha1.Project, enginePod, podNam
 			fnArgs = append(fnArgs, "--max-apicalls", fmt.Sprintf("%d", agentMaxAPICalls))
 		}
 	}
-	// Coverage gate call (dagmar-4154): when a coverage floor is set on the Sub-Run,
-	// append `dagger call dagmar-gate --source /workspace --coverage-floor-bps <n>`
-	// after the coder step. The gate runs inside the pod as self-verification; the
-	// controller's gate evaluation (advanceGating) still relies on pod success/failure.
+	// Gate chain (dagmar-4154 + dagmar-60c3): after code() runs, export the modified workspace
+	// to /workspace-result, then run dagmar-gate against it. The gate's JSON output (GateResult
+	// contract — .dagmar/internal/workflows/gate.go) goes to /dev/termination-log, where the
+	// controller reads pod.Status.ContainerStatuses[0].State.Terminated.Message. The controller
+	// parses the JSON for gate-green/red + coverage, and ratchets the coverage floor.
+	//
+	// The gate module (.dagmar) is loaded from the RESULT directory (it's inside the repo clone).
+	// coverage-floor-bps is passed from the Sub-Run annotation.
 	gateCall := ""
 	if coverageFloorBps > 0 {
 		gateCall = fmt.Sprintf(
-			` && dagger call -m %s dagmar-gate --source /workspace --coverage-floor-bps %d`,
-			project.Spec.ModuleRef, coverageFloorBps)
+			` export --path /workspace-result && `+
+				`dagger call -m /workspace-result/.dagmar dagmar-gate --source /workspace-result --coverage-floor-bps %d > /dev/termination-log`,
+			coverageFloorBps,
+		)
+	} else {
+		gateCall = ` export --path /workspace-result && ` +
+			`dagger call -m /workspace-result/.dagmar dagmar-gate --source /workspace-result > /dev/termination-log`
 	}
 	cmd := fmt.Sprintf(
 		`apk add --no-cache %s && `+

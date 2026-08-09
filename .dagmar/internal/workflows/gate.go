@@ -3,6 +3,7 @@ package workflows
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -10,24 +11,33 @@ import (
 	"dagger/dagmar-project/internal/dagger"
 )
 
+// GateResult is the standardized JSON contract for dagmar-gate output. Every project's
+// dagmar-gate function MUST return a JSON string matching this structure. The controller
+// parses it from the pod's termination log; CI parses it from stdout. The gate NEVER returns
+// an error — failures are represented as {"passed": false} with check details.
+type GateResult struct {
+	Passed      bool          `json:"passed"`
+	Checks      []CheckResult `json:"checks"`
+	CoverageBps int           `json:"coverage_bps,omitempty"` // total coverage in basis points (0-10000), 0 if not measured
+	FloorBps    int           `json:"floor_bps,omitempty"`   // coverage floor that was enforced, 0 if not checked
+}
+
+// CheckResult is the per-check outcome inside a GateResult.
+type CheckResult struct {
+	Name   string `json:"name"`
+	Passed bool   `json:"passed"`
+	// Output contains failure details when Passed is false (truncated for termination log).
+	Output string `json:"output,omitempty"`
+}
+
 // checkable is a hard-coded gate check (ADR-0017 §3: checkables are Go code, NOT YAML).
-// Each checkable runs a shell command in the mise-bootstrapped container at a given workdir.
 type checkable struct {
 	name    string
 	workdir string
 	command string
 }
 
-// gateChecks is dagmar's hard-coded checkable list. ADR-0017 §3 superseded the YAML
-// checkables: gate logic — what to check, how, in what order — lives entirely in Go code
-// inside dagmar-gate, not in .dagmar/project.yaml.
-//
-// The checks mirror the former YAML checkables:
-//   - controller: root module build + vet + test + gofmt-clean
-//   - dagger-module: .dagger platform module build + vet + test
-//   - dagmar-project: .dagmar project module build + vet + test (self-build — broken gate caught BY the gate)
-//   - manifest: published platform schema module build + vet + test
-//   - secrets: secret scan via betterleaks (provided by mise)
+// gateChecks is dagmar's hard-coded checkable list (ADR-0017 §3).
 var gateChecks = []checkable{
 	{name: "controller", workdir: ".", command: "go build ./... && go vet ./... && go test ./... && test -z \"$(gofmt -l .)\""},
 	{name: "dagger-module", workdir: ".dagger", command: "go build ./... && go vet ./... && go test ./..."},
@@ -36,62 +46,84 @@ var gateChecks = []checkable{
 	{name: "secrets", workdir: ".", command: "betterleaks dir ."},
 }
 
-// Gate is dagmar-gate: the always-Dagger verify wrapper. It runs the hard-coded checkables
-// (ADR-0017 §3 — Go code, NOT YAML manifest) in the mise-bootstrapped container, and returns a
-// summary; a non-zero checkable aborts the gate with an error (so CI fails). Pure VERIFY — it
-// does not roll out the toolchain itself (dagmar-bootstrap does; the gate reuses that base as a
-// Dagger-cached layer). Networked container — the gate is the deterministic-networked layer
-// (ADR-0011); hermeticity is the LLM-loop constraint, not the gate's.
+// Gate is dagmar-gate: the always-Dagger verify wrapper. Runs hard-coded Go checkables
+// (ADR-0017 §3) and returns a structured JSON GateResult — NEVER an error. Callers (CI,
+// controller) check the "passed" field. Coverage ratcheting (dagmar-4154) runs when
+// coverageFloorBps > 0.
 //
-// dagmar-gate is reused in CI (GitHub Actions: `dagger call -m .dagmar dagmar-gate --source .`)
-// AND in-loop (coder self-verification, Phase 2).
-//
-// coverageFloorBps is the ratcheted coverage floor in basis points (0–10000, e.g. 7850 = 78.50%).
-// When > 0, the gate additionally runs `go test -coverprofile` in the root module and compares
-// total coverage against the floor (dagmar-4154). 0 = coverage check disabled.
+// The JSON output is the contract: it flows to the pod's /dev/termination-log, where the
+// controller reads pod.Status.ContainerStatuses[0].State.Terminated.Message.
 func Gate(ctx context.Context, source *dagger.Directory, githubToken *dagger.Secret, coverageFloorBps int) (string, error) {
-	var summaries []string
-	totalChecks := len(gateChecks)
+	result := GateResult{Passed: true}
+
 	for _, c := range gateChecks {
 		out, exit, err := runCheck(ctx, source, githubToken, c)
 		if err != nil {
-			return "", fmt.Errorf("dagmar-gate: check %q: %w", c.name, err)
+			result.Passed = false
+			result.Checks = append(result.Checks, CheckResult{
+				Name: c.name, Passed: false,
+				Output: fmt.Sprintf("execution error: %v", err),
+			})
+			return marshalGate(result)
 		}
 		if exit != 0 {
-			// Include the failing output so CI / the coder sees why.
-			return "", fmt.Errorf("dagmar-gate: check %q FAILED (exit %d)\n--- output ---\n%s",
-				c.name, exit, strings.TrimSpace(out))
+			result.Passed = false
+			result.Checks = append(result.Checks, CheckResult{
+				Name: c.name, Passed: false,
+				Output: truncateForTerminationLog(out),
+			})
+			return marshalGate(result)
 		}
-		summaries = append(summaries, fmt.Sprintf("  \u2713 %s", c.name))
+		result.Checks = append(result.Checks, CheckResult{Name: c.name, Passed: true})
 	}
 
-	// Coverage check (dagmar-4154): when a floor is set, measure total go test coverage and
-	// compare it against the ratcheted floor. The floor is expressed in basis points (0–10000)
-	// to avoid float64 in CRD schemas.
+	// Coverage check (dagmar-4154).
 	if coverageFloorBps > 0 {
 		coverageBps, err := runCoverageCheck(ctx, source, githubToken, coverageFloorBps)
 		if err != nil {
-			return "", err
+			result.Passed = false
+			result.CoverageBps = 0
+			result.FloorBps = coverageFloorBps
+			result.Checks = append(result.Checks, CheckResult{
+				Name: "coverage", Passed: false,
+				Output: truncateForTerminationLog(err.Error()),
+			})
+			return marshalGate(result)
 		}
-		summaries = append(summaries,
-			fmt.Sprintf("  \u2713 coverage: %s (floor: %s)",
-				formatBps(coverageBps), formatBps(coverageFloorBps)))
-		totalChecks++
+		result.CoverageBps = coverageBps
+		result.FloorBps = coverageFloorBps
+		result.Checks = append(result.Checks, CheckResult{Name: "coverage", Passed: true})
 	}
 
-	return fmt.Sprintf("dagmar-gate: all %d check(s) passed\n%s",
-		totalChecks, strings.Join(summaries, "\n")), nil
+	return marshalGate(result)
 }
 
-// runCoverageCheck runs `go test -coverprofile=coverage.out ./...` in the root module (reusing
-// the same mise-bootstrapped container), parses total coverage from `go tool cover -func`, and
-// returns it in basis points. If measured coverage is below the floor, the gate goes RED.
+// marshalGate serializes a GateResult to JSON. Never returns an error (the struct is simple).
+func marshalGate(r GateResult) (string, error) {
+	b, err := json.Marshal(r)
+	if err != nil {
+		return `{"passed":false,"checks":[{"name":"marshal","passed":false,"output":"json marshal failed"}]}`, nil
+	}
+	return string(b), nil
+}
+
+// truncateForTerminationLog caps a string to fit within the K8s termination-message limit
+// (4096 bytes total, but we leave room for the JSON envelope).
+func truncateForTerminationLog(s string) string {
+	const maxOutputLen = 2000
+	s = strings.TrimSpace(s)
+	if len(s) > maxOutputLen {
+		return s[:maxOutputLen] + "\n... (truncated)"
+	}
+	return s
+}
+
+// runCoverageCheck runs `go test -coverprofile=coverage.out ./...` in the root module,
+// parses total coverage, and returns it in basis points. Returns an error if below floor
+// or if the tests themselves fail.
 func runCoverageCheck(ctx context.Context, source *dagger.Directory, githubToken *dagger.Secret, floorBps int) (int, error) {
 	ctr := bootstrapBase(source, githubToken).WithWorkdir("/src")
 
-	// Run tests with coverage in the root module. Merge stderr→stdout and capture exit code
-	// (same DAGMAR_EXIT pattern as runCheck). A non-zero exit means the tests themselves
-	// failed — the coverage gate cannot proceed.
 	cmd := `exec 2>&1; go test -coverprofile=coverage.out ./...; echo "DAGMAR_EXIT=$?"`
 	out, err := ctr.WithExec([]string{"sh", "-c", cmd},
 		dagger.ContainerWithExecOpts{Expect: dagger.ReturnTypeAny}).Stdout(ctx)
@@ -103,8 +135,6 @@ func runCoverageCheck(ctx context.Context, source *dagger.Directory, githubToken
 			exit, strings.TrimSpace(out))
 	}
 
-	// Parse the total coverage from `go tool cover -func=coverage.out`. The last line is:
-	//   total:		(statements)	82.3%
 	coverOut, err := ctr.WithExec([]string{"sh", "-c", "go tool cover -func=coverage.out"}).Stdout(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("dagmar-gate: coverage: go tool cover: %w", err)
@@ -122,21 +152,13 @@ func runCoverageCheck(ctx context.Context, source *dagger.Directory, githubToken
 	return coverageBps, nil
 }
 
-// parseCoverTotal extracts the total coverage percentage from `go tool cover -func` output and
-// returns it as basis points (int, 0–10000). The total line has the form:
-//
-//	total:		(statements)	82.3%
-//
-// Returns (bps, true) on success, (0, false) if no total line was found.
 func parseCoverTotal(coverOut string) (int, bool) {
 	lines := strings.Split(coverOut, "\n")
-	// The total line is always the last non-empty line starting with "total:".
 	for i := len(lines) - 1; i >= 0; i-- {
 		line := strings.TrimSpace(lines[i])
 		if !strings.HasPrefix(line, "total:") {
 			continue
 		}
-		// Extract the trailing percentage: everything after the last tab.
 		fields := strings.Fields(line)
 		if len(fields) == 0 {
 			continue
@@ -146,31 +168,20 @@ func parseCoverTotal(coverOut string) (int, bool) {
 		if err != nil {
 			continue
 		}
-		bps := int(pct*100 + 0.5) // round to nearest basis point
+		bps := int(pct*100 + 0.5)
 		return bps, true
 	}
 	return 0, false
 }
 
-// formatBps converts basis points (7850) to a human-readable percentage string ("78.50%").
 func formatBps(bps int) string {
 	return fmt.Sprintf("%.2f%%", float64(bps)/100)
 }
 
-// runCheck runs one hard-coded checkable in the mise-bootstrapped container and returns
-// (stdout, exitCode, err). The exit code is captured explicitly (DAGMAR_EXIT) with Expect=Any
-// so a non-zero exit yields the output rather than an opaque exec error.
+// runCheck runs one hard-coded checkable and returns (stdout, exitCode, err).
 func runCheck(ctx context.Context, source *dagger.Directory, githubToken *dagger.Secret, c checkable) (string, int, error) {
-	// Derive from the mise-bootstrapped base (bootstrapBase: tools on PATH via mise shims). The
-	// bootstrap layer is a Dagger cache hit once realized by dagmar-bootstrap or a prior check.
-	// Override workdir to the checkable's (bootstrapBase mounts /src + sets workdir /src).
 	ctr := bootstrapBase(source, githubToken).
 		WithWorkdir("/src/" + c.workdir)
-	// Merge stderr into stdout for the WHOLE command chain (Go toolchain diagnostics —
-	// build/vet/test errors — go to stderr; review-14 FIX-1). `exec 2>&1` redirects the shell's
-	// fd 2→1 for the rest of the script (a bare trailing `2>&1` would bind only to the last `&&`
-	// command). Then append the exit-code marker. ReturnTypeAny keeps the exec from erroring on
-	// non-zero, so a failing check's "why" reaches the abort message.
 	cmd := `exec 2>&1; ` + c.command + `; echo "DAGMAR_EXIT=$?"`
 	out, err := ctr.WithExec([]string{"sh", "-c", cmd},
 		dagger.ContainerWithExecOpts{Expect: dagger.ReturnTypeAny}).Stdout(ctx)
@@ -181,10 +192,6 @@ func runCheck(ctx context.Context, source *dagger.Directory, githubToken *dagger
 	return out, exit, nil
 }
 
-// parseDagmarExit extracts the exit code from the LAST "DAGMAR_EXIT=<n>" marker in the output
-// (review-14 FIX-2 — the LAST one is the real marker after the command chain; an earlier literal
-// line in the command's own output must not mask a real failure as pass). Defaults to 1 (fail) if
-// no marker is present (the command did not reach the echo — treat as failure).
 func parseDagmarExit(out string) int {
 	last := -1
 	for _, line := range strings.Split(out, "\n") {

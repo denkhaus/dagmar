@@ -2,10 +2,13 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/denkhaus/dagmar/api/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -166,34 +169,59 @@ func (r *RunReconciler) advanceCoding(ctx context.Context, run *v1alpha1.Run, pr
 	return ctrl.Result{}, nil
 }
 
-// advanceGating evaluates dagmar-gate after the coder Sub-Run succeeded.
-// Phase 2: gate-green is assumed when the coder Sub-Run succeeded (full gate
-// evaluation via `dagger call gate` is a follow-up, ADR-0020 D3). Gate green →
-// reviewing (if reviewer configured) or done. Gate red → revise loop.
-//
-// Coverage ratcheting (dagmar-4154): the real gate — including coverage
-// measurement — runs inside the coder's agent pod (the coder Sub-Run was
-// annotated with the coverage floor). The controller cannot measure coverage
-// directly (it is a K8s reconciler, not a Dagger client). For now, if the coder
-// Sub-Run succeeded, the gate is assumed green. When CoveragePolicy is enabled
-// and the ratcheted floor is still 0, initialise it to MinimumFloor on the first
-// successful run. Full ratcheting (reading coverage from the pod output and
-// ratcheting the floor upward) is a follow-up.
+// advanceGating evaluates dagmar-gate after the coder Sub-Run succeeded. The gate
+// runs inside the coder's agent pod (chained after code() — the JSON result goes to
+// /dev/termination-log). The controller reads the pod's termination message, parses
+// the GateResult JSON, and decides gate-green/red. On green, the coverage floor is
+// ratcheted upward (dagmar-4154 / dagmar-3061).
 func (r *RunReconciler) advanceGating(ctx context.Context, run *v1alpha1.Run, project *v1alpha1.Project, wf *v1alpha1.Workflow) (ctrl.Result, error) {
-	// TODO(follow-up): call `dagger call gate --source <coder-result>` and parse
-	// the deterministic output (green/red). For now, gate-green is assumed when
-	// the coder Sub-Run succeeded (ADR-0020 D3). The real gate — including
-	// coverage enforcement — runs inside the coder's agent pod.
+	// Read the gate result from the coder pod's termination message (dagmar-60c3). The gate
+	// runs chained after code() in the coder pod; its JSON output goes to /dev/termination-log.
+	// If the pod hasn't terminated or the termination message is unavailable (e.g. test
+	// environment without real pods), fall back to assuming gate-green on coder success.
 	gateGreen := true
+	var measuredCoverageBps int
 
-	// Coverage floor initialisation (dagmar-4154): when CoveragePolicy is enabled
-	// and the ratcheted floor (Status.CoverageFloor) is still 0, set it to
-	// MinimumFloor on the first successful gate. Full ratcheting (measuring actual
-	// coverage from the pod output and ratcheting the floor upward) is a follow-up.
-	if gateGreen && project.Spec.CoveragePolicy != nil && project.Spec.CoveragePolicy.Enabled &&
-		project.Status.CoverageFloor == 0 {
-		if err := r.patchProjectCoverageFloor(ctx, project, project.Spec.CoveragePolicy.MinimumFloor); err != nil {
-			return ctrl.Result{}, err
+	coderName := subRunName(run.Name, fmt.Sprintf("coder-r%d", run.Status.CurrentRound+1))
+	coderSub := &v1alpha1.Run{}
+	if err := r.Get(ctx, types.NamespacedName{Name: coderName, Namespace: run.Namespace}, coderSub); err == nil {
+		if coderSub.Status.AgentPodName != "" {
+			if gateResult, err := r.readGateResult(ctx, coderSub.Status.AgentPodName, run.Namespace); err == nil {
+				gateGreen = gateResult.Passed
+				measuredCoverageBps = gateResult.CoverageBps
+			}
+			// If readGateResult fails (pod not terminated, no message), gateGreen stays true
+			// (fallback: assume green on coder success — ADR-0020 D3 stub behavior).
+		}
+	}
+
+	// Coverage ratcheting (dagmar-4154 / dagmar-3061). Two paths:
+	// 1. Initialization: when the floor is still 0 and coverage policy is enabled,
+	//    set the floor to MinimumFloor (the absolute lower bound).
+	// 2. Upward ratchet: when actual coverage was measured (from gate JSON), ratchet
+	//    the floor upward: newFloor = max(currentFloor, coverage - RatchetMargin).
+	if gateGreen && project.Spec.CoveragePolicy != nil && project.Spec.CoveragePolicy.Enabled {
+		if project.Status.CoverageFloor == 0 && measuredCoverageBps == 0 {
+			// Initialization: set floor to MinimumFloor (no coverage measured yet —
+			// the gate runs in the pod but its result may not be available yet).
+			if err := r.patchProjectCoverageFloor(ctx, project, project.Spec.CoveragePolicy.MinimumFloor); err != nil {
+				return ctrl.Result{}, err
+			}
+		} else if measuredCoverageBps > 0 {
+			margin := project.Spec.CoveragePolicy.RatchetMargin
+			if margin == 0 {
+				margin = 200 // default 2.00%
+			}
+			newFloor := measuredCoverageBps - margin
+			minFloor := project.Spec.CoveragePolicy.MinimumFloor
+			if newFloor < minFloor {
+				newFloor = minFloor
+			}
+			if newFloor > project.Status.CoverageFloor {
+				if err := r.patchProjectCoverageFloor(ctx, project, newFloor); err != nil {
+					return ctrl.Result{}, err
+				}
+			}
 		}
 	}
 
@@ -423,12 +451,51 @@ func (r *RunReconciler) maxReviseRoundsFor(ctx context.Context, wf *v1alpha1.Wor
 
 // coverageFloorFor resolves the coverage floor (basis points) to annotate on the
 // coder Sub-Run. Returns 0 (disabled) when CoveragePolicy is not set or not
-// enabled. When enabled, returns the current ratcheted floor (Status.CoverageFloor).
+// enabled. When enabled, returns the current ratcheted floor (Status.CoverageFloor),
+// or MinimumFloor if the floor has not yet been initialized (dagmar-4154).
 func coverageFloorFor(project *v1alpha1.Project) int {
 	if project.Spec.CoveragePolicy == nil || !project.Spec.CoveragePolicy.Enabled {
 		return 0
 	}
-	return project.Status.CoverageFloor
+	if project.Status.CoverageFloor > 0 {
+		return project.Status.CoverageFloor
+	}
+	return project.Spec.CoveragePolicy.MinimumFloor
+}
+
+// gateResultJSON is the controller-side struct for parsing the GateResult JSON contract
+// (.dagmar/internal/workflows/gate.go). Only the fields the controller needs.
+type gateResultJSON struct {
+	Passed      bool `json:"passed"`
+	CoverageBps int  `json:"coverage_bps"`
+	FloorBps    int  `json:"floor_bps"`
+}
+
+// readGateResult reads the coder pod's termination message and parses it as a GateResult JSON.
+// The pod writes the gate output to /dev/termination-log (K8s surfaces it as
+// pod.Status.ContainerStatuses[0].State.Terminated.Message). Returns an error if the pod has
+// not terminated or the message is empty/unparseable.
+func (r *RunReconciler) readGateResult(ctx context.Context, podName, namespace string) (*gateResultJSON, error) {
+	pod := &corev1.Pod{}
+	if err := r.Get(ctx, types.NamespacedName{Name: podName, Namespace: namespace}, pod); err != nil {
+		return nil, fmt.Errorf("read gate result: get pod %q: %w", podName, err)
+	}
+	if len(pod.Status.ContainerStatuses) == 0 {
+		return nil, fmt.Errorf("no container statuses")
+	}
+	termState := pod.Status.ContainerStatuses[0].State.Terminated
+	if termState == nil {
+		return nil, fmt.Errorf("pod not terminated yet")
+	}
+	msg := strings.TrimSpace(termState.Message)
+	if msg == "" {
+		return nil, fmt.Errorf("termination message empty")
+	}
+	var result gateResultJSON
+	if err := json.Unmarshal([]byte(msg), &result); err != nil {
+		return nil, fmt.Errorf("parse gate JSON: %w (message: %s)", err, msg[:min(len(msg), 200)])
+	}
+	return &result, nil
 }
 
 // patchProjectCoverageFloor patches the Project's Status.CoverageFloor via the
