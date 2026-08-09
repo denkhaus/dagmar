@@ -414,8 +414,8 @@ func agentPodFor(run *v1alpha1.Run, project *v1alpha1.Project, enginePod, podNam
 	}
 	cmd := fmt.Sprintf(
 		`apk add --no-cache %s && `+
-			preCall+
 			`curl -fsSL https://github.com/dagger/dagger/releases/download/v%s/dagger_v%s_linux_amd64.tar.gz | tar xz -C /usr/local/bin dagger && `+
+			preCall+
 			`dagger call -m %s %s %s`+gateCall,
 		apkPkgs, daggerVersion, daggerVersion, project.Spec.ModuleRef, run.Spec.ModuleFunction, shellJoin(fnArgs),
 	)
