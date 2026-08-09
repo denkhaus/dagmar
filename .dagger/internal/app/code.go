@@ -38,18 +38,20 @@ func Code(
 ) (*dagger.Directory, error) {
 	// 1. Load the project module so its functions become LLM tools.
 	//    ModuleSource(ref) → AsModule() → Sync() forces load + validation.
-	projectMod, err := dagger.Connect().ModuleSource(moduleRef).AsModule().Sync(ctx)
+	client := dagger.Connect()
+
+	projectMod, err := client.ModuleSource(moduleRef).AsModule().Sync(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("code: load project module %q: %w", moduleRef, err)
 	}
 
 	// 2. Build the Env: workspace + project module's LLM-Tool hooks (ADR-0021 D2).
-	env := dagger.Connect().Env().
+	env := client.Env().
 		WithWorkspace(source).
 		WithMainModule(projectMod)
 
 	// 3. Build the LLM with prompt + budget (ADR-0021 D4).
-	llm := dagger.Connect().LLM(dagger.LLMOpts{
+	llm := client.LLM(dagger.LLMOpts{
 		Model:       model,
 		MaxAPICalls: maxAPICalls,
 	}).

@@ -10,12 +10,16 @@ review. The reviewer advises only; does NOT execute (no seeds, no fixes).
 ## Usage
 
 ```python
-# Auto-detect range (last review..HEAD):
-handle = await dagmar_review.run()
+# From the Prime Agent IPython kernel:
+handle = await dagmar_review.run(_rlm=rlm)
 
 # With explicit range and scope:
-handle = await dagmar_review.run(range="abc1234..HEAD", scope="adr-0022")
+handle = await dagmar_review.run(range="abc1234..HEAD", scope="adr-0022", _rlm=rlm)
 ```
+
+The `_rlm` parameter injects the Prime Agent spawn function (a kernel global)
+into the skill module. This is required because Python modules cannot see
+kernel globals directly.
 
 ## Install
 

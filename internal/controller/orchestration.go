@@ -97,7 +97,7 @@ func (r *RunReconciler) advanceCoder(ctx context.Context, run *v1alpha1.Run, pro
 	if sub.Status.Phase == v1alpha1.RunPhaseFailed {
 		// Coder failed → revise loop or escalate.
 		round := run.Status.CurrentRound + 1
-		maxRound := 3 // default; could read from QualityGate spec
+		maxRound := r.maxReviseRoundsFor(ctx, wf, run.Namespace)
 		if round > maxRound {
 			return ctrl.Result{}, r.transitionPipeline(ctx, run, PipelineEscalated,
 				"MaxReviseRoundsExceeded", sub.Name)
@@ -134,7 +134,7 @@ func (r *RunReconciler) advanceReview(ctx context.Context, run *v1alpha1.Run, pr
 	if sub.Status.Phase == v1alpha1.RunPhaseFailed {
 		// Reviewer failed → revise loop or escalate.
 		round := run.Status.CurrentRound + 1
-		maxRound := 3
+		maxRound := r.maxReviseRoundsFor(ctx, wf, run.Namespace)
 		if round > maxRound {
 			return ctrl.Result{}, r.transitionPipeline(ctx, run, PipelineEscalated,
 				"MaxReviseRoundsExceeded", sub.Name)

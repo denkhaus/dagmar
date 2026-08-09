@@ -90,17 +90,17 @@ arguments. This is the ADR-0010 §3 pattern: Tier A used directly in `app/`.
 ```go
 // app/code.go (sketch)
 func Code(ctx context.Context, source *dagger.Directory, promptFile *dagger.File,
-    model string, maxAPICalls int) (string, error) {
+    model string, maxAPICalls int, moduleRef string) (*dagger.Directory, error) {
 
+    client := dagger.Connect()
     // 1. Build the Env: workspace + project module tools
-    // Load the project module (.dagmar/) so its functions become LLM tools
-    projectMod := dagger.Connect().ModuleSource(".dagmar").AsModule().Sync(ctx)
-    env := dagger.Connect().Env().
+    projectMod := client.ModuleSource(moduleRef).AsModule().Sync(ctx)
+    env := client.Env().
         WithWorkspace(source).
         WithMainModule(projectMod)  // registers LLM-Tool hooks (dagmar-issues/memory/prompt)
 
     // 2. Build the LLM
-    llm := dagger.Connect().LLM(dagger.LLMOpts{
+    llm := client.LLM(dagger.LLMOpts{
         Model:       model,
         MaxAPICalls: maxAPICalls,
     }).
@@ -189,7 +189,7 @@ merge is control-plane logic, not execution-plane.
 
 ADR-0020 D6 established: the in-loop self-verification runs via `env.Checks()` — module-annotated
 check functions discovered by the Env. The `code` function's Env construction includes
-`WithCurrentModule()`, which registers the project module's functions as tools AND makes its check
+`WithMainModule(projectModule)`, which registers the project module's functions as tools AND makes its check
 functions discoverable via `env.Checks()`.
 
 The LLM can call `env.Checks().Run()` during the Loop to self-verify (ADR-0009: "the gate is the
@@ -199,7 +199,7 @@ iterate if checks fail.
 ### D7 — Hermeticity: WithMainModule + excluded tools, not network isolation
 
 Per ADR-0011 §2, hermeticity is a **tool-surface constraint**. The `code` function's Env includes
-`WithCurrentModule()` (registers the LLM-Tool hooks — dagmar-issues/memory/prompt), but the
+`WithMainModule(projectModule)` (registers the LLM-Tool hooks — dagmar-issues/memory/prompt). The
 default Env tools are curated by the module. Network-capable tools (`http`, `git` remote,
 container exec) are NOT on the Env by default — they must be explicitly added.
 
@@ -208,7 +208,7 @@ URLs), the controller passes a flag, and the `code` function conditionally adds 
 ADR-0011's model: tool-set exclusion is the primary control; the residual network access from raw
 container exec is the accepted risk (ProbeNet finding).
 
-For Phase 2 v1, all coder Runs are hermetic: `WithCurrentModule()` only, no network tools. The
+For Phase 2 v1, all coder Runs are hermetic: `WithMainModule(projectModule)` only, no network tools. The
 agent works on the workspace, calls hooks for issues/memory/prompts, and self-verifies via
 `env.Checks()`.
 
@@ -222,15 +222,16 @@ The PR flow (ADR-0020 D3) is a **separate controller-dispatched function** on th
 module:
 
 ```go
-// Changeset extracts the diff from a pre-Loop workspace and a post-Loop workspace.
+// Diff extracts the changes from a post-Loop workspace vs. the pre-Loop baseline.
 func (m *Dagmar) Diff(
     ctx context.Context,
     // before is the pre-Loop workspace (the original clone).
     before *dagger.Directory,
     // after is the post-Loop workspace (Code's return value).
     after *dagger.Directory,
-) (*dagger.Changeset, error) {
-    return after.Diff(before), nil  // or equivalent v0.21.8 API
+) *dagger.Directory {
+	return app.Diff(after, before)
+}
 }
 ```
 
@@ -244,7 +245,7 @@ design principle is that cost accounting is captured inside the function, not by
 ## Consequences
 
 - **Two methods on `.dagger` platform module:** `Code(source, promptFile, model, maxAPICalls) → *dagger.Directory`
-  and `Changeset(before, after) → *dagger.Changeset`. The Phase-0 dispatch pattern
+  and `Diff(after, before) → *dagger.Directory`. The Phase-0 dispatch pattern
   (`dagger call -m <ref> <fn>`) extends naturally — both are just functions.
 - **Env is execution-plane, not control-plane:** the K8s controller cannot construct Dagger SDK
   types; it dispatches the function, and the function builds the Env. This is ADR-0010 §3.
@@ -256,7 +257,7 @@ design principle is that cost accounting is captured inside the function, not by
   The function receives a ready `.md` file.
 - **Checkable is env.Checks():** the project module's check functions, discovered natively by
   the Env. No manual gate invocation inside the Loop.
-- **Hermetic by default:** `WithCurrentModule()` only; network tools excluded (ADR-0011).
+- **Hermetic by default:** `WithMainModule(projectModule)` only; network tools excluded (ADR-0011).
 - **Agent CRD needed (Phase 2):** carries model, prompt refs, maxAPICalls, tool-set policy.
 
 ## Alternatives considered
@@ -283,7 +284,7 @@ design principle is that cost accounting is captured inside the function, not by
 - **Tool-set as a function parameter (caller chooses tools).** Rejected for v1 — the tool-set
   is determined by the Agent role (hermetic coder vs networked researcher), not by the caller.
   The controller dispatches the same `code` function; the Env's tools come from
-  `WithCurrentModule()` (always) plus role-specific additions (future).
+  `WithMainModule(projectModule)` (always) plus role-specific additions (future).
 
 - **MaxAPICalls = 0 (unlimited).** Rejected — a Run without a budget is an unbounded cost
   vector. The default (100) is generous for a coding task and can be overridden per Agent.
