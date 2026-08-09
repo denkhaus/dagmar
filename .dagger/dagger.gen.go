@@ -324,6 +324,55 @@ func invoke(ctx context.Context, parentJSON []byte, parentName string, fnName st
 				panic(fmt.Errorf("%s: %w", "failed to unmarshal parent object", err))
 			}
 			return (*Dagmar).ProbeNet(&parent, ctx)
+		case "Prompt":
+			var parent Dagmar
+			err = json.Unmarshal(parentJSON, &parent)
+			if err != nil {
+				panic(fmt.Errorf("%s: %w", "failed to unmarshal parent object", err))
+			}
+			var source *dagger.Directory
+			if inputArgs["source"] != nil {
+				err = json.Unmarshal([]byte(inputArgs["source"]), &source)
+				if err != nil {
+					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg source", err))
+				}
+			}
+			var phase string
+			if inputArgs["phase"] != nil {
+				err = json.Unmarshal([]byte(inputArgs["phase"]), &phase)
+				if err != nil {
+					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg phase", err))
+				}
+			}
+			var taskContext string
+			if inputArgs["taskContext"] != nil {
+				err = json.Unmarshal([]byte(inputArgs["taskContext"]), &taskContext)
+				if err != nil {
+					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg taskContext", err))
+				}
+			}
+			var model string
+			if inputArgs["model"] != nil {
+				err = json.Unmarshal([]byte(inputArgs["model"]), &model)
+				if err != nil {
+					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg model", err))
+				}
+			}
+			var maxApicalls int
+			if inputArgs["maxAPICalls"] != nil {
+				err = json.Unmarshal([]byte(inputArgs["maxAPICalls"]), &maxApicalls)
+				if err != nil {
+					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg maxAPICalls", err))
+				}
+			}
+			var moduleRef string
+			if inputArgs["moduleRef"] != nil {
+				err = json.Unmarshal([]byte(inputArgs["moduleRef"]), &moduleRef)
+				if err != nil {
+					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg moduleRef", err))
+				}
+			}
+			return (*Dagmar).Prompt(&parent, ctx, source, phase, taskContext, model, maxApicalls, moduleRef)
 		case "Sandbox":
 			var parent Dagmar
 			err = json.Unmarshal(parentJSON, &parent)

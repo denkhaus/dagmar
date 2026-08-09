@@ -122,6 +122,47 @@ func (m *Dagmar) Code(
 	return app.Code(ctx, src, promptFile, model, maxAPICalls, moduleRef)
 }
 
+// Prompt is dagmar's prompter-loop entry point (ADR-0023 D1). It synthesizes a tailored
+// prompt for the Coder or Reviewer by running a short LLM loop that reads project source,
+// issues, and memory. The synthesized prompt is returned as a string — the controller
+// forwards it as --prompt-file to the subsequent Code or Review Run.
+//
+// The args are primitives + Dagger types because Dagger codegen requires main-package types
+// only. The app layer builds the read-only Env, selects the meta-prompt by phase, and drives
+// the Loop (ADR-0010 §3: Tier A direct). Delegates to app.Prompt.
+func (m *Dagmar) Prompt(
+	ctx context.Context,
+	// source is the project source directory (read-only). The prompter reads files
+	// from here to ground the synthesized prompt in real project context.
+	source *dagger.Directory,
+	// phase selects which meta-prompt to use: "pre-code" (coder) or "pre-review" (reviewer).
+	phase string,
+	// taskContext is the issue text / task description from the orchestrating Run.
+	taskContext string,
+	// model is the LLM model identifier (e.g. "anthropic/claude-sonnet-4").
+	// The prompter may use a smaller/faster model — synthesis is well-bounded (ADR-0023 D6).
+	// +optional
+	// +default="anthropic/claude-sonnet-4"
+	model string,
+	// maxAPICalls bounds the LLM API calls for this synthesis Run. Low budget —
+	// prompt synthesis is well-bounded (ADR-0023 D1).
+	// +optional
+	// +default=10
+	maxAPICalls int,
+	// moduleRef is the project module reference (the Project CR's moduleRef).
+	// Registers dagmar-issues + dagmar-memory as LLM-Tool hooks via WithMainModule.
+	// Defaults to ".dagmar" (dagmar dogfooding itself).
+	// +optional
+	// +default=".dagmar"
+	moduleRef string,
+) (string, error) {
+	src := source
+	if src == nil {
+		src = m.Project
+	}
+	return app.Prompt(ctx, src, phase, taskContext, model, maxAPICalls, moduleRef)
+}
+
 // Diff computes the difference between a pre-Loop and post-Loop workspace (ADR-0021 D8).
 // The controller calls this after Code() to extract the agent's changes for the PR flow
 // (ADR-0020 D3). Returns a Directory containing only the changed files.
