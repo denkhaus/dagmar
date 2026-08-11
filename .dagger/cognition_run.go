@@ -13,6 +13,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"dagger/dagmar/internal/app"
 	"dagger/dagmar/internal/dagger"
@@ -276,9 +277,14 @@ func (c *CognitionRun) Run(ctx context.Context) (string, error) {
 
 		c.pushStep(ctx, "prompt")
 
-		// Code: run the coder LLM Loop.
-		c.WithCode(ctx)
-		c.pushStep(ctx, "code")
+		// Code: run the coder LLM Loop. Skip if the prompt step failed (no PromptFile).
+		if c.PromptFile != nil {
+			c.WithCode(ctx)
+			c.pushStep(ctx, "code")
+		} else {
+			c.mergeResult(errorResult("code", c.Rounds+1, fmt.Errorf("prompt step produced no prompt file")))
+			c.pushStep(ctx, "code")
+		}
 
 		// Gate: run the project's dagmar-gate Hook.
 		c.WithGate(ctx)

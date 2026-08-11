@@ -84,8 +84,10 @@ func Prompt(
 
 	// 3. Optionally load the project module so dagmar-issues + dagmar-memory become
 	//    LLM-Tool hooks (ADR-0019). The prompter calls these during synthesis.
+	var projectMod *dagger.Module
 	if moduleRef != "" {
-		projectMod, err := client.ModuleSource(moduleRef).AsModule().Sync(ctx)
+		var err error
+		projectMod, err = client.ModuleSource(moduleRef).AsModule().Sync(ctx)
 		if err != nil {
 			return "", fmt.Errorf("prompt: load project module %q: %w", moduleRef, err)
 		}
@@ -105,7 +107,10 @@ func Prompt(
 
 	// 5. Apply per-role tool-surface policy (ADR-0024): block dagmar-bootstrap,
 	// dagmar-gate, and Container (prompter is read-only — no container exec).
-	llm = blockForRole(llm, RolePrompter)
+	// Introspects the loaded module so only existing functions are blocked —
+	// the platform knows the hook names by contract, but the loaded module
+	// may not expose all of them (e.g. dogfooding loads the main module).
+	llm = blockForRole(ctx, llm, projectMod, RolePrompter)
 
 	// 6. Block on the Loop — the prompter reads files, calls tools, and synthesizes.
 	llm = llm.Loop()

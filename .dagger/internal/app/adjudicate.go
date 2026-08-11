@@ -92,8 +92,10 @@ func Adjudicate(
 
 	// 4. Optionally load the project module so dagmar-issues + dagmar-memory become
 	//    LLM-Tool hooks (ADR-0019). The Adjudicator calls these during analysis.
+	var projectMod *dagger.Module
 	if moduleRef != "" {
-		projectMod, err := client.ModuleSource(moduleRef).AsModule().Sync(ctx)
+		var err error
+		projectMod, err = client.ModuleSource(moduleRef).AsModule().Sync(ctx)
 		if err != nil {
 			return "", fmt.Errorf("adjudicate: load project module %q: %w", moduleRef, err)
 		}
@@ -113,7 +115,7 @@ func Adjudicate(
 
 	// 6. Apply per-role tool-surface policy (ADR-0024): block dagmar-bootstrap,
 	// dagmar-gate, and Container (adjudicator is read-only — no container exec).
-	llm = blockForRole(llm, RoleAdjudicator)
+	llm = blockForRole(ctx, llm, projectMod, RoleAdjudicator)
 
 	// 7. Block on the Loop — the Adjudicator reads files, calls tools, and reasons.
 	llm = llm.Loop()
