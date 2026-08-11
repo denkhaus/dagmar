@@ -157,10 +157,6 @@ spec:
                   - type
                   type: object
                 type: array
-              currentRound:
-                description: CurrentRound is the revise-round counter for orchestration
-                  Runs (ADR-0016 §3).
-                type: integer
               phase:
                 description: |-
                   Phase is the high-level lifecycle phase (Pending|Running|Succeeded|Failed), DERIVED from the
@@ -169,8 +165,8 @@ spec:
                 type: string
               pipelinePhase:
                 description: |-
-                  PipelinePhase tracks orchestration Run progress (ADR-0023 D5).
-                  Values: "coding" | "gating" | "reviewing" | "adjudicating" | "escalated" | "done".
+                  PipelinePhase tracks orchestration Run progress (ADR-0027).
+                  Values: "dispatching" | "running" | "done" | "escalated".
                   Zero-valued on atomic Runs.
                 type: string
               stepResults:
@@ -201,12 +197,6 @@ spec:
                 maxItems: 50
                 type: array
                 x-kubernetes-list-type: map
-              subRunRefs:
-                description: SubRunRefs names the child Runs created by an orchestration
-                  Run (ADR-0016 §3).
-                items:
-                  type: string
-                type: array
             type: object
         type: object
     served: true

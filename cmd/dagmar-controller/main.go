@@ -49,17 +49,26 @@ func main() {
 		setupFatal(err, "new manager")
 	}
 
-	if err = (&controller.RunReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
-		setupFatal(err, "setup RunReconciler")
+	// Collector HTTP server (ADR-0027 D3): receives step-result pushes from the
+	// CognitionRun pipeline's Collector. Runs as a manager Runnable. Created before
+	// the RunReconciler so the reconciler can generate per-Run push tokens.
+	collector := &controller.CollectorServer{Client: mgr.GetClient()}
+	if err := mgr.Add(collector); err != nil {
+		setupFatal(err, "setup CollectorServer")
 	}
 
-	// Collector HTTP server (ADR-0027 D3): receives step-result pushes from the
-	// CognitionRun pipeline's Collector. Runs as a manager Runnable.
-	if err := mgr.Add(&controller.CollectorServer{Client: mgr.GetClient()}); err != nil {
-		setupFatal(err, "setup CollectorServer")
+	// collectorURL is the endpoint the agent pod pushes step results to. Read
+	// from env (e.g. http://dagmar-controller.dagmar-system.svc:8082/step-result).
+	// Empty = standalone (pipeline runs without pushing results).
+	collectorURL := os.Getenv("DAGMAR_COLLECTOR_URL")
+
+	if err = (&controller.RunReconciler{
+		Client:       mgr.GetClient(),
+		Scheme:       mgr.GetScheme(),
+		Collector:    collector,
+		CollectorURL: collectorURL,
+	}).SetupWithManager(mgr); err != nil {
+		setupFatal(err, "setup RunReconciler")
 	}
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {

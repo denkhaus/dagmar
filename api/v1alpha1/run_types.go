@@ -92,19 +92,11 @@ type RunStatus struct {
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
 
-	// PipelinePhase tracks orchestration Run progress (ADR-0023 D5).
-	// Values: "coding" | "gating" | "reviewing" | "adjudicating" | "escalated" | "done".
+	// PipelinePhase tracks orchestration Run progress (ADR-0027).
+	// Values: "dispatching" | "running" | "done" | "escalated".
 	// Zero-valued on atomic Runs.
 	// +optional
 	PipelinePhase string `json:"pipelinePhase,omitempty"`
-
-	// CurrentRound is the revise-round counter for orchestration Runs (ADR-0016 §3).
-	// +optional
-	CurrentRound int `json:"currentRound,omitempty"`
-
-	// SubRunRefs names the child Runs created by an orchestration Run (ADR-0016 §3).
-	// +optional
-	SubRunRefs []string `json:"subRunRefs,omitempty"`
 
 	// StepResults holds step-by-step results pushed by the CognitionRun pipeline's
 	// Collector (ADR-0027 D3). Each entry is a step result from the pipeline execution:

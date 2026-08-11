@@ -3,7 +3,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -59,7 +58,11 @@ const (
 // (ADR-0012 §2 SPEC-1).
 type RunReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme    *runtime.Scheme
+	Collector *CollectorServer // generates step-result push tokens (ADR-0027 D3)
+	// CollectorURL is the base URL the agent pod uses to push step results back
+	// to the controller's Collector endpoint. Empty = standalone (no push).
+	CollectorURL string
 }
 
 // +kubebuilder:rbac:groups=dagmar.denkhaus.io,resources=runs,verbs=get;list;watch;create;update;patch;delete
@@ -166,11 +169,6 @@ func (r *RunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		agentModel = coderAgent.Spec.Model
 		agentMaxAPICalls = coderAgent.Spec.MaxAPICalls
 
-		// Generate a Collector token for this Run (ADR-0027 D3).
-		// The callback URL + token are injected as pod env vars.
-		// TODO: wire CollectorServer into the reconciler for token generation.
-		// For now, the pipeline runs without a callback (empty = standalone).
-
 		// Mark accepted.
 		_ = r.patchStatus(ctx, run, func(s *v1alpha1.RunStatus) {
 			gen := run.Generation
@@ -193,6 +191,16 @@ func (r *RunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		if covFloor := coverageFloorFor(project); covFloor > 0 {
 			run.Spec.ModuleArgs = append(run.Spec.ModuleArgs, "--coverage-floor-bps", fmt.Sprintf("%d", covFloor))
 		}
+		// Callback URL + token for step-result pushes (ADR-0027 D3).
+		// The pipeline pushes after each step; the controller's CollectorServer
+		// receives the pushes and stores them in Run.Status.StepResults.
+		if r.CollectorURL != "" && r.Collector != nil {
+			token := r.Collector.GenerateToken(run.Name)
+			run.Spec.ModuleArgs = append(run.Spec.ModuleArgs,
+				"--callback-url", r.CollectorURL,
+				"--callback-token", token,
+			)
+		}
 		// Fall through to the agent-pod path (below) — no return here.
 		// The existing path clones the workspace, installs dagger, and runs the function.
 		// No prompter chaining or gate chaining (the pipeline handles those internally).
@@ -213,32 +221,9 @@ func (r *RunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		agentMaxAPICalls = agent.Spec.MaxAPICalls
 	}
 
-	// 3e. Resolve prompter configuration for Sub-Runs created by orchestration
-	// (ADR-0023 D3). The orchestration controller stores the prompter model,
-	// maxAPICalls, and phase as annotations on each coder/reviewer Sub-Run. The
-	// atomic-Run Reconcile path reads them here to chain the prompt() call into
-	// the Pod command (prompt→code in the same Pod).
-	var prompterModel string
-	var prompterMaxAPICalls int
-	var prompterPhase string
-	// coverageFloorBps is read from the Sub-Run annotation set by the orchestrator
-	// when CoveragePolicy is enabled (dagmar-4154). The agent pod passes
-	// --coverage-floor-bps to `dagger call dagmar-gate` during self-verification.
-	var coverageFloorBps int
-	if run.Spec.ParentRun != "" && run.Annotations != nil {
-		if v, ok := run.Annotations[annPrompterPhase]; ok {
-			prompterPhase = v
-			prompterModel = run.Annotations[annPrompterModel]
-			if n, err := strconv.Atoi(run.Annotations[annPrompterMaxAPICalls]); err == nil {
-				prompterMaxAPICalls = n
-			}
-		}
-		if v, ok := run.Annotations[annCoverageFloor]; ok {
-			if n, err := strconv.Atoi(v); err == nil {
-				coverageFloorBps = n
-			}
-		}
-	}
+	// Coverage floor for the cognition-run pipeline (passed as --coverage-floor-bps).
+	// For atomic Runs this is 0 (the gate runs separately, if at all).
+	coverageFloorBps := coverageFloorFor(project)
 
 	// 4. Resolve the singleton engine pod (a Ready one). Transiently absent (engine still rolling
 	// out) → requeue, not terminal.
@@ -261,8 +246,7 @@ func (r *RunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		logger.Error(err, "ensure agent identity", "run", req.NamespacedName)
 		return ctrl.Result{}, err
 	}
-	pod, err := r.ensureAgentPod(ctx, run, project, enginePod, agentModel, agentMaxAPICalls,
-		prompterModel, prompterMaxAPICalls, prompterPhase, coverageFloorBps)
+	pod, err := r.ensureAgentPod(ctx, run, project, enginePod, agentModel, agentMaxAPICalls, coverageFloorBps)
 	if err != nil {
 		logger.Error(err, "ensure agent pod", "run", req.NamespacedName)
 		return ctrl.Result{}, err
@@ -276,6 +260,29 @@ func (r *RunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		reason, message = "AgentPodFailed", "agent pod exited non-zero"
 	case corev1.PodSucceeded:
 		reason, message = "AgentPodSucceeded", "agent pod exited zero"
+		// For CognitionRun pipelines, the pod exiting 0 does not mean the task
+		// succeeded — the pipeline may have exhausted its revise budget
+		// (outcome=max_retries) or adjudicated a review veto. Evaluate the
+		// pushed StepResults to determine the semantic outcome (ADR-0027 D3).
+		if run.Spec.ModuleFunction == "cognition-run" {
+			outcome, terminal := evaluatePipelineOutcome(run.Status.StepResults)
+			if terminal && outcome != "approve" && outcome != "adjudicated" {
+				// Pipeline completed but did not approve — treat as failed.
+				reason, message = "PipelineNotApproved",
+					fmt.Sprintf("pipeline outcome: %s", outcome)
+				return ctrl.Result{}, r.reconcileStatus(ctx, run, corev1.PodFailed, reason, message)
+			}
+			if terminal {
+				// Approved or adjudicated — coverage ratcheting if applicable.
+				if project.Spec.CoveragePolicy != nil && project.Spec.CoveragePolicy.Enabled {
+					if bps := extractCoverageBps(run.Status.StepResults); bps > 0 {
+						if err := r.ratchetCoverage(ctx, project, bps); err != nil {
+							logger.Error(err, "ratchet coverage")
+						}
+					}
+				}
+			}
+		}
 	case corev1.PodRunning:
 		reason, message = "Dispatched", "agent pod running"
 	}
@@ -349,7 +356,7 @@ func (r *RunReconciler) ensureAgentIdentity(ctx context.Context, run *v1alpha1.R
 }
 
 // ensureAgentPod creates the agent pod if it does not yet exist and returns it.
-func (r *RunReconciler) ensureAgentPod(ctx context.Context, run *v1alpha1.Run, project *v1alpha1.Project, enginePod string, agentModel string, agentMaxAPICalls int, prompterModel string, prompterMaxAPICalls int, prompterPhase string, coverageFloorBps int) (*corev1.Pod, error) {
+func (r *RunReconciler) ensureAgentPod(ctx context.Context, run *v1alpha1.Run, project *v1alpha1.Project, enginePod string, agentModel string, agentMaxAPICalls int, coverageFloorBps int) (*corev1.Pod, error) {
 	podName := agentPodName(run.Name)
 	pod := &corev1.Pod{}
 	err := r.Get(ctx, types.NamespacedName{Name: podName, Namespace: run.Namespace}, pod)
@@ -359,8 +366,7 @@ func (r *RunReconciler) ensureAgentPod(ctx context.Context, run *v1alpha1.Run, p
 	if !errors.IsNotFound(err) {
 		return nil, err
 	}
-	newPod := agentPodFor(run, project, enginePod, podName, agentModel, agentMaxAPICalls,
-		prompterModel, prompterMaxAPICalls, prompterPhase, coverageFloorBps)
+	newPod := agentPodFor(run, project, enginePod, podName, agentModel, agentMaxAPICalls, coverageFloorBps)
 	if err := ctrl.SetControllerReference(run, newPod, r.Scheme); err != nil {
 		return nil, fmt.Errorf("set controller reference: %w", err)
 	}
@@ -380,7 +386,7 @@ const llmSecretName = "dagger-llm-config"
 // runs as the per-namespace dagmar-agent SA (granted pods/exec on the engine) and uses in-cluster
 // auth for the kubectl exec the runner host performs — no kubeconfig mount (unlike the cbb8 Probe
 // client, which ran outside the cluster).
-func agentPodFor(run *v1alpha1.Run, project *v1alpha1.Project, enginePod, podName string, agentModel string, agentMaxAPICalls int, prompterModel string, prompterMaxAPICalls int, prompterPhase string, coverageFloorBps int) *corev1.Pod {
+func agentPodFor(run *v1alpha1.Run, project *v1alpha1.Project, enginePod, podName string, agentModel string, agentMaxAPICalls int, coverageFloorBps int) *corev1.Pod {
 	image := defaultAgentPodImage
 	if project.Spec.AgentPodImage != "" {
 		image = project.Spec.AgentPodImage
@@ -410,29 +416,23 @@ func agentPodFor(run *v1alpha1.Run, project *v1alpha1.Project, enginePod, podNam
 		preCall = `git config --global credential.helper '!f() { echo username=dagmar; echo password="$DAGMAR_GIT_PAT"; }; f' && `
 	}
 	// Build the module function + args.
-	// postCall is appended after the dagger call (result export, configmap, etc.).
 	var postCall string
 	// Two cases:
 	//   1. CognitionRun (ModuleFunction = "cognition-run"): the pipeline handles
-	//      prompt/code/gate/review internally. The pod just clones the workspace,
-	//      calls cognition-run with `run` as terminal, exports the JSON result to
-	//      a ConfigMap. No shell chaining, no termination-log (ADR-0027).
+	//      prompt/code/gate/review internally. The pod clones the workspace and
+	//      calls cognition-run with `run` as terminal. Step results are pushed to
+	//      the controller's Collector via HTTP (ADR-0027 D3). No ConfigMap,
+	//      no termination-log.
 	//   2. Atomic Run (any other ModuleFunction): existing behavior — clone +
 	//      call the function with its args.
 	fnArgs := run.Spec.ModuleArgs
 	if agentModel != "" && run.Spec.ModuleFunction == "cognition-run" {
-		// CognitionRun pipeline: clone workspace, call cognition-run, export result.
 		preCall += fmt.Sprintf(`git clone %s /workspace && `, project.Spec.Repo)
 		// The ModuleArgs set by the orchestration branch already contain:
-		// --source, --task-context, --model, --module-ref, --max-apicalls, etc.
-		// We append `run` as the terminal method (returns JSON).
+		// --source, --task-context, --model, --module-ref, --max-apicalls,
+		// --callback-url, --callback-token, etc.
 		fnArgs = append(fnArgs, "run")
-		// Export the JSON result to a file, then write it to a ConfigMap
-		// for the controller to read (ADR-0027 D6).
-		postCall = fmt.Sprintf(` -o /tmp/result.json && `+
-			`kubectl create configmap dagmar-result-%s --from-file=result=/tmp/result.json --overwrite`,
-			run.Name,
-		)
+		postCall = "" // no ConfigMap — results arrive via HTTP push
 	} else if agentModel != "" {
 		// Atomic Run: clone workspace and call the function.
 		preCall += fmt.Sprintf(`git clone %s /workspace && `, project.Spec.Repo)
@@ -628,7 +628,6 @@ func (r *RunReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&v1alpha1.Run{}).
 		Owns(&corev1.Pod{}).
-		Owns(&v1alpha1.Run{}). // Sub-Runs created by orchestration Runs (ADR-0016 §4)
 		Named("run").
 		Complete(r)
 }
