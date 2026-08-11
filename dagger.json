@@ -4,5 +4,11 @@
   "sdk": {
     "source": "go"
   },
+  "dependencies": [
+    {
+      "name": "dagmar-project",
+      "source": ".dagmar"
+    }
+  ],
   "source": ".dagger"
 }

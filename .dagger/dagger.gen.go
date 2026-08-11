@@ -79,6 +79,78 @@ func (r *Dagmar) UnmarshalJSON(bs []byte) error {
 	return nil
 }
 
+func (r CognitionRun) MarshalJSON() ([]byte, error) {
+	var concrete struct {
+		Source           *dagger.Directory
+		TaskContext      string
+		Model            string
+		MaxAPICalls      int
+		ModuleRef        string
+		CoverageFloorBps int
+		MaxRevise        int
+		CallbackURL      string
+		CallbackToken    string
+		PromptText       string `json:"prompt_text"`
+		GateJSON         string `json:"gate_result"`
+		GatePassed       bool   `json:"gate_passed"`
+		ReviewJSON       string `json:"review_verdict"`
+		Rounds           int    `json:"rounds"`
+	}
+	concrete.Source = r.Source
+	concrete.TaskContext = r.TaskContext
+	concrete.Model = r.Model
+	concrete.MaxAPICalls = r.MaxAPICalls
+	concrete.ModuleRef = r.ModuleRef
+	concrete.CoverageFloorBps = r.CoverageFloorBps
+	concrete.MaxRevise = r.MaxRevise
+	concrete.CallbackURL = r.CallbackURL
+	concrete.CallbackToken = r.CallbackToken
+	concrete.PromptText = r.PromptText
+	concrete.GateJSON = r.GateJSON
+	concrete.GatePassed = r.GatePassed
+	concrete.ReviewJSON = r.ReviewJSON
+	concrete.Rounds = r.Rounds
+	return json.Marshal(&concrete)
+}
+
+func (r *CognitionRun) UnmarshalJSON(bs []byte) error {
+	var concrete struct {
+		Source           *dagger.Directory
+		TaskContext      string
+		Model            string
+		MaxAPICalls      int
+		ModuleRef        string
+		CoverageFloorBps int
+		MaxRevise        int
+		CallbackURL      string
+		CallbackToken    string
+		PromptText       string `json:"prompt_text"`
+		GateJSON         string `json:"gate_result"`
+		GatePassed       bool   `json:"gate_passed"`
+		ReviewJSON       string `json:"review_verdict"`
+		Rounds           int    `json:"rounds"`
+	}
+	err := json.Unmarshal(bs, &concrete)
+	if err != nil {
+		return err
+	}
+	r.Source = concrete.Source
+	r.TaskContext = concrete.TaskContext
+	r.Model = concrete.Model
+	r.MaxAPICalls = concrete.MaxAPICalls
+	r.ModuleRef = concrete.ModuleRef
+	r.CoverageFloorBps = concrete.CoverageFloorBps
+	r.MaxRevise = concrete.MaxRevise
+	r.CallbackURL = concrete.CallbackURL
+	r.CallbackToken = concrete.CallbackToken
+	r.PromptText = concrete.PromptText
+	r.GateJSON = concrete.GateJSON
+	r.GatePassed = concrete.GatePassed
+	r.ReviewJSON = concrete.ReviewJSON
+	r.Rounds = concrete.Rounds
+	return nil
+}
+
 func (r Sandbox) MarshalJSON() ([]byte, error) {
 	var concrete struct{}
 	return json.Marshal(&concrete)
@@ -210,6 +282,67 @@ func dispatch(ctx context.Context) (rerr error) {
 func invoke(ctx context.Context, parentJSON []byte, parentName string, fnName string, inputArgs map[string][]byte) (_ any, err error) {
 	_ = inputArgs
 	switch parentName {
+	case "CognitionRun":
+		switch fnName {
+		case "JSON":
+			var parent CognitionRun
+			err = json.Unmarshal(parentJSON, &parent)
+			if err != nil {
+				panic(fmt.Errorf("%s: %w", "failed to unmarshal parent object", err))
+			}
+			return (*CognitionRun).JSON(&parent), nil
+		case "Run":
+			var parent CognitionRun
+			err = json.Unmarshal(parentJSON, &parent)
+			if err != nil {
+				panic(fmt.Errorf("%s: %w", "failed to unmarshal parent object", err))
+			}
+			return (*CognitionRun).Run(&parent, ctx)
+		case "WithAdjudicate":
+			var parent CognitionRun
+			err = json.Unmarshal(parentJSON, &parent)
+			if err != nil {
+				panic(fmt.Errorf("%s: %w", "failed to unmarshal parent object", err))
+			}
+			return (*CognitionRun).WithAdjudicate(&parent, ctx), nil
+		case "WithCode":
+			var parent CognitionRun
+			err = json.Unmarshal(parentJSON, &parent)
+			if err != nil {
+				panic(fmt.Errorf("%s: %w", "failed to unmarshal parent object", err))
+			}
+			return (*CognitionRun).WithCode(&parent, ctx), nil
+		case "WithGate":
+			var parent CognitionRun
+			err = json.Unmarshal(parentJSON, &parent)
+			if err != nil {
+				panic(fmt.Errorf("%s: %w", "failed to unmarshal parent object", err))
+			}
+			return (*CognitionRun).WithGate(&parent, ctx), nil
+		case "WithPrompt":
+			var parent CognitionRun
+			err = json.Unmarshal(parentJSON, &parent)
+			if err != nil {
+				panic(fmt.Errorf("%s: %w", "failed to unmarshal parent object", err))
+			}
+			var phase string
+			if inputArgs["phase"] != nil {
+				err = json.Unmarshal([]byte(inputArgs["phase"]), &phase)
+				if err != nil {
+					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg phase", err))
+				}
+			}
+			return (*CognitionRun).WithPrompt(&parent, ctx, phase), nil
+		case "WithReview":
+			var parent CognitionRun
+			err = json.Unmarshal(parentJSON, &parent)
+			if err != nil {
+				panic(fmt.Errorf("%s: %w", "failed to unmarshal parent object", err))
+			}
+			return (*CognitionRun).WithReview(&parent, ctx), nil
+		default:
+			return nil, fmt.Errorf("unknown function %s", fnName)
+		}
 	case "Dagmar":
 		switch fnName {
 		case "Adjudicate":
@@ -379,7 +512,7 @@ func invoke(ctx context.Context, parentJSON []byte, parentName string, fnName st
 					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg callbackToken", err))
 				}
 			}
-			return (*Dagmar).CognitionRun(&parent, ctx, source, taskContext, model, maxApicalls, moduleRef, coverageFloorBps, maxRevise, callbackUrl, callbackToken)
+			return (*Dagmar).CognitionRun(&parent, source, taskContext, model, maxApicalls, moduleRef, coverageFloorBps, maxRevise, callbackUrl, callbackToken), nil
 		case "Diff":
 			var parent Dagmar
 			err = json.Unmarshal(parentJSON, &parent)

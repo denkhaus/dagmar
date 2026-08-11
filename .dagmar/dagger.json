@@ -1,5 +1,5 @@
 {
-  "name": "dagmar",
+  "name": "dagmar-project",
   "engineVersion": "v0.21.8",
   "sdk": {
     "source": "go"

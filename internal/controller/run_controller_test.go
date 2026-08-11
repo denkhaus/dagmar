@@ -462,21 +462,22 @@ func TestReconcile_CognitionRunInjectsWorkspaceAndPrompt(t *testing.T) {
 
 	mustReconcile(t, ctx, r, ctrl.Request{NamespacedName: types.NamespacedName{Name: "cog-1", Namespace: "default"}})
 
-	// The pod should exist with the cognition-specific command.
+	// The pod should exist with the cognition command.
 	pod := &corev1.Pod{}
 	if err := cl.Get(ctx, types.NamespacedName{Name: agentPodName("cog-1"), Namespace: "default"}, pod); err != nil {
 		t.Fatalf("get pod: %v", err)
 	}
 	cmd := pod.Spec.Containers[0].Command[2]
-	// Should contain workspace clone + prompt + code() args.
+	// Atomic code() run: clone workspace + call code with args.
 	assertContains(t, cmd, "git clone")
 	assertContains(t, cmd, "/workspace")
-	assertContains(t, cmd, "/tmp/prompt.md")
 	assertContains(t, cmd, "--model")
 	assertContains(t, cmd, "test-model")
 	assertContains(t, cmd, "--max-apicalls")
 	assertContains(t, cmd, "50")
 	assertContains(t, cmd, "--module-ref")
+	// No prompter chaining for atomic code() calls.
+	assertNotContains(t, cmd, "/tmp/prompt.md")
 }
 
 func assertContains(t *testing.T, s, substr string) {
@@ -516,46 +517,4 @@ func TestReconcile_NonCognitionRunHasNoGateChain(t *testing.T) {
 	assertNotContains(t, cmd, "export --path")
 	assertNotContains(t, cmd, "dagmar-gate")
 	assertContains(t, cmd, "dagger call --allow-llm all -m "+testModuleRef+" probe-net")
-}
-
-// TestReconcile_TaskContextFlowsToPrompter verifies that the Run's TaskContext is injected
-// as --task-context into the prompter call (dagmar-d8dc). Without it the prompter gets an empty
-// context and explores the entire codebase aimlessly.
-func TestReconcile_TaskContextFlowsToPrompter(t *testing.T) {
-	run := &v1alpha1.Run{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "cog-task", Namespace: "default",
-			Annotations: map[string]string{
-				annPrompterPhase:       "pre-code",
-				annPrompterModel:       "test-model",
-				annPrompterMaxAPICalls: "5",
-			},
-		},
-		Spec: v1alpha1.RunSpec{
-			ProjectRef:     "dagmar-own",
-			AgentRef:       "coder-agent",
-			ModuleFunction: "code",
-			ParentRun:      "parent-orchestration",
-			TaskContext:    "Implement feature X in file Y",
-		},
-	}
-	r, cl := newTestReconciler(t, run)
-
-	agent := &v1alpha1.Agent{
-		ObjectMeta: metav1.ObjectMeta{Name: "coder-agent", Namespace: "default"},
-		Spec:       v1alpha1.AgentSpec{Model: "test-model", MaxAPICalls: 50},
-	}
-	if err := cl.Create(ctx, agent); err != nil {
-		t.Fatalf("create agent: %v", err)
-	}
-
-	mustReconcile(t, ctx, r, ctrl.Request{NamespacedName: types.NamespacedName{Name: "cog-task", Namespace: "default"}})
-
-	pod := &corev1.Pod{}
-	if err := cl.Get(ctx, types.NamespacedName{Name: agentPodName("cog-task"), Namespace: "default"}, pod); err != nil {
-		t.Fatalf("get pod: %v", err)
-	}
-	cmd := pod.Spec.Containers[0].Command[2]
-	assertContains(t, cmd, "--task-context 'Implement feature X in file Y'")
-	assertNotContains(t, cmd, "--task-context ''")
 }

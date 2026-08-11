@@ -410,70 +410,49 @@ func agentPodFor(run *v1alpha1.Run, project *v1alpha1.Project, enginePod, podNam
 		preCall = `git config --global credential.helper '!f() { echo username=dagmar; echo password="$DAGMAR_GIT_PAT"; }; f' && `
 	}
 	// Build the module function + args.
+	// postCall is appended after the dagger call (result export, configmap, etc.).
+	var postCall string
+	// Two cases:
+	//   1. CognitionRun (ModuleFunction = "cognition-run"): the pipeline handles
+	//      prompt/code/gate/review internally. The pod just clones the workspace,
+	//      calls cognition-run with `run` as terminal, exports the JSON result to
+	//      a ConfigMap. No shell chaining, no termination-log (ADR-0027).
+	//   2. Atomic Run (any other ModuleFunction): existing behavior — clone +
+	//      call the function with its args.
 	fnArgs := run.Spec.ModuleArgs
-	if agentModel != "" {
-		// Cognition Run (AgentRef set): clone workspace + inject code() args.
-		// The workspace clone (ADR-0020 D1) is an ephemeral git clone into /workspace.
-		preCall += fmt.Sprintf(
-			`git clone %s /workspace && `,
-			project.Spec.Repo,
+	if agentModel != "" && run.Spec.ModuleFunction == "cognition-run" {
+		// CognitionRun pipeline: clone workspace, call cognition-run, export result.
+		preCall += fmt.Sprintf(`git clone %s /workspace && `, project.Spec.Repo)
+		// The ModuleArgs set by the orchestration branch already contain:
+		// --source, --task-context, --model, --module-ref, --max-apicalls, etc.
+		// We append `run` as the terminal method (returns JSON).
+		fnArgs = append(fnArgs, "run")
+		// Export the JSON result to a file, then write it to a ConfigMap
+		// for the controller to read (ADR-0027 D6).
+		postCall = fmt.Sprintf(` -o /tmp/result.json && `+
+			`kubectl create configmap dagmar-result-%s --from-file=result=/tmp/result.json --overwrite`,
+			run.Name,
 		)
-		// Chained prompter (ADR-0023 D3): the prompter synthesizes a tailored
-		// prompt in the same Pod, redirecting its string output to /tmp/prompt.md.
-		// The code() call then reads it via --prompt-file. No controller decision
-		// point between prompting and coding — the prompter's output flows directly
-		// to the coder/reviewer.
-		if prompterPhase != "" {
-			prompterCmd := fmt.Sprintf(
-				`dagger call --allow-llm all -m %s prompt --source /workspace --phase %s --task-context %s --model %s`,
-				project.Spec.ModuleRef, prompterPhase, shellQuote(run.Spec.TaskContext), prompterModel,
-			)
-			if prompterMaxAPICalls > 0 {
-				prompterCmd += fmt.Sprintf(` --max-apicalls %d`, prompterMaxAPICalls)
-			}
-			prompterCmd += fmt.Sprintf(` --module-ref %s > /tmp/prompt.md && `, project.Spec.ModuleRef)
-			preCall += prompterCmd
-		}
+	} else if agentModel != "" {
+		// Atomic Run: clone workspace and call the function.
+		preCall += fmt.Sprintf(`git clone %s /workspace && `, project.Spec.Repo)
 		fnArgs = append(fnArgs,
 			"--source", "/workspace",
-			"--prompt-file", "/tmp/prompt.md",
 			"--module-ref", project.Spec.ModuleRef,
 			"--model", agentModel,
 		)
 		if agentMaxAPICalls > 0 {
 			fnArgs = append(fnArgs, "--max-apicalls", fmt.Sprintf("%d", agentMaxAPICalls))
 		}
-	}
-	// Gate chain (dagmar-4154 + dagmar-60c3): after code() runs, export the modified workspace
-	// to /workspace-result, then run dagmar-gate against it. The gate's JSON output (GateResult
-	// contract — .dagmar/internal/workflows/gate.go) goes to /dev/termination-log, where the
-	// controller reads pod.Status.ContainerStatuses[0].State.Terminated.Message. The controller
-	// parses the JSON for gate-green/red + coverage, and ratchets the coverage floor.
-	//
-	// The gate module (.dagmar) is loaded from the RESULT directory (it's inside the repo clone).
-	// coverage-floor-bps is passed from the Sub-Run annotation.
-	//
-	// Gate chain is cognition-only: code() returns a Directory that `+"`export`"+` can serialize.
-	// Non-cognition Runs (probe-net, sandbox, …) return other types; appending `+"`export`"+` causes
-	// "unknown command" parse errors. Only cognition Runs produce a workspace worth gating.
-	gateCall := ""
-	if agentModel != "" {
-		if coverageFloorBps > 0 {
-			gateCall = fmt.Sprintf(
-				` export --path /workspace-result && `+
-					`dagger call --allow-llm all -m /workspace-result/.dagmar dagmar-gate --source /workspace-result --coverage-floor-bps %d > /dev/termination-log`,
-				coverageFloorBps,
-			)
-		} else {
-			gateCall = ` export --path /workspace-result && ` +
-				`dagger call --allow-llm all -m /workspace-result/.dagmar dagmar-gate --source /workspace-result > /dev/termination-log`
-		}
+		postCall = ""
+	} else {
+		postCall = ""
 	}
 	cmd := fmt.Sprintf(
 		`apk add --no-cache %s && `+
 			`curl -fsSL https://github.com/dagger/dagger/releases/download/v%s/dagger_v%s_linux_amd64.tar.gz | tar xz -C /usr/local/bin dagger && `+
 			preCall+
-			`dagger call --allow-llm all -m %s %s %s`+gateCall,
+			`dagger call --allow-llm all -m %s %s %s`+postCall,
 		apkPkgs, daggerVersion, daggerVersion, project.Spec.ModuleRef, run.Spec.ModuleFunction, shellJoin(fnArgs),
 	)
 	env := []corev1.EnvVar{

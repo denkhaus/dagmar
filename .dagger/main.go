@@ -238,19 +238,14 @@ func (m *Dagmar) Review(
 	return rawJSON, nil
 }
 
-// CognitionRun is dagmar's cognition pipeline entry point (ADR-0027). It chains
-// Prompt → Code → Gate → Review → Adjudicate as Go-method calls within a single
-// Dagger function — the greetings-api pattern. Internal revise loops preserve the
-// coder's LLM context (gate-red → re-code, same agent context).
+// CognitionRun creates a new cognition pipeline as a Dagger Custom Object (ADR-0027).
+// Each step (Prompt, Code, Gate, Review, Adjudicate) is a chainable method on the
+// returned CognitionRun struct. The struct's exported fields hold the accumulated
+// pipeline state — Dagger serializes them between method calls (ADR-0027 D1).
 //
-// The pipeline returns a structured JSON string the controller parses for policy
-// decisions (done / retry / escalate). Step results are pushed to the controller's
-// Collector HTTP endpoint when --callback-url is set (ADR-0027 D3).
-//
-// This replaces the multi-Sub-Run orchestration (ADR-0026 step-level FSM) with a
-// single pipeline call (ADR-0027 policy-level FSM).
+// The gate step calls the project's dagmar-gate Hook via a typed cross-module call
+// (dag.Dagmar().DagmarGate) — the project defines what the gate is (ADR-0014).
 func (m *Dagmar) CognitionRun(
-	ctx context.Context,
 	// source is the project source directory.
 	source *dagger.Directory,
 	// taskContext is the issue text / task description.
@@ -263,7 +258,7 @@ func (m *Dagmar) CognitionRun(
 	// +optional
 	// +default=100
 	maxAPICalls int,
-	// moduleRef is the project module reference (registers dagmar-issues + dagmar-memory).
+	// moduleRef is the project module reference (registers dagmar-issues + dagmar-memory + dagmar-gate).
 	// +optional
 	// +default=".dagmar"
 	moduleRef string,
@@ -284,12 +279,12 @@ func (m *Dagmar) CognitionRun(
 	// +optional
 	// +default=""
 	callbackToken string,
-) (string, error) {
+) *CognitionRun {
 	src := source
 	if src == nil {
 		src = m.Project
 	}
-	return app.CognitionRun(ctx, src, taskContext, model, maxAPICalls, moduleRef, coverageFloorBps, maxRevise, callbackURL, callbackToken)
+	return NewCognitionRun(src, taskContext, model, maxAPICalls, moduleRef, coverageFloorBps, maxRevise, callbackURL, callbackToken)
 }
 
 // Diff computes the difference between a pre-Loop and post-Loop workspace (ADR-0021 D8).
