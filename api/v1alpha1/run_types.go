@@ -103,7 +103,6 @@ type RunStatus struct {
 	// prompt, code, gate, review, adjudicate. Provides fine-grained visibility for the
 	// controller's policy decisions (retry/escalate/done) and k9s observability.
 	// +optional
-	// +listType=map
 	// +kubebuilder:validation:MaxItems=50
 	StepResults []StepResult `json:"stepResults,omitempty"`
 }
