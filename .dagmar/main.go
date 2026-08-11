@@ -64,3 +64,54 @@ func (m *Dagmar) DagmarGate(
 ) (string, error) {
 	return workflows.Gate(ctx, source, githubToken, coverageFloorBps)
 }
+
+// DagmarIssues is dagmar's issue-tracker LLM-Tool hook (ADR-0019 D2 / ADR-0017 §2).
+// Registered via Env.WithMainModule() and called by the LLM as a native Dagger tool during the
+// loop. The LLM uses it to read, search, create, and update issues in the project's tracker
+// (seeds). Delegates to workflows.DagmarIssues.
+//
+// Operates on the project worktree implicitly (ADR-0019 D2) — no source parameter. The backing
+// CLI (sd) reads .seeds/ from the current working directory.
+func (m *Dagmar) DagmarIssues(
+	ctx context.Context,
+	// action: "read" | "search" | "create" | "update"
+	action string,
+	// id: issue identifier (for read/update).
+	// +optional
+	id string,
+	// query: search text (for search).
+	// +optional
+	query string,
+	// title: issue title (for create).
+	// +optional
+	title string,
+	// body: issue body (for create/update).
+	// +optional
+	body string,
+) (string, error) {
+	return workflows.DagmarIssues(ctx, action, id, query, title, body)
+}
+
+// DagmarMemory is dagmar's expertise-store LLM-Tool hook (ADR-0019 D2 / ADR-0017 §2).
+// Registered via Env.WithMainModule() and called by the LLM as a native Dagger tool during the
+// loop. The LLM uses it to read, search, and write project expertise (mulch). Delegates to
+// workflows.DagmarMemory.
+//
+// Operates on the project worktree implicitly (ADR-0019 D2) — no source parameter. The backing
+// CLI (ml) reads .mulch/ from the current working directory.
+func (m *Dagmar) DagmarMemory(
+	ctx context.Context,
+	// action: "read" | "search" | "write"
+	action string,
+	// query: expertise query or domain (for read/search).
+	// +optional
+	query string,
+	// key: record key/domain (for write).
+	// +optional
+	key string,
+	// value: expertise content (for write).
+	// +optional
+	value string,
+) (string, error) {
+	return workflows.DagmarMemory(ctx, action, query, key, value)
+}
