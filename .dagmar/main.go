@@ -16,14 +16,15 @@ import (
 	"dagger/dagmar-project/internal/workflows"
 )
 
-// Dagmar is dagmar-as-a-Project's main Dagger object (ADR-0014). It carries no per-Project
-// bound state: the gate-family methods take the Project source per call. (Distinct from the
-// platform module's Dagmar object in .dagger/, which binds a target Project;
-// the inter-module name collision is benign — the two modules are path-addressed, -m .dagger
-// vs -m .dagmar.) The dagger.json `name: "dagmar"` (not "dagmar-project") is forced: Dagger
-// derives the main object type from `name` (kebab→CamelCase), so it must match `type Dagmar`;
-// the go.mod path `dagger/dagmar-project` and the checkable name differ but do not collide.
-type Dagmar struct{}
+// Dagmar is dagmar-as-a-Project's main Dagger object (ADR-0014). It carries the Project source
+// as bound state for the LLM-Tool hooks (dagmar-issues, dagmar-memory), which need it to build
+// containers with the workspace mounted. The gate-family methods still take source explicitly.
+type Dagmar struct {
+	// Source is the project source directory, resolved from dag.CurrentModule().Source()
+	// when the module functions are called by the LLM via WithMainModule.
+	// +private
+	Source *dagger.Directory
+}
 
 // DagmarBootstrap is dagmar's gate-family PREPARE step (ADR-0009 §2 / ADR-0012 §4): an
 // always-Dagger function that rolls out the Project's mise toolchain (mise.toml) into the gate
@@ -89,7 +90,11 @@ func (m *Dagmar) DagmarIssues(
 	// +optional
 	body string,
 ) (string, error) {
-	return workflows.DagmarIssues(ctx, action, id, query, title, body)
+	src := m.Source
+	if src == nil {
+		src = dag.CurrentModule().Source()
+	}
+	return workflows.DagmarIssues(ctx, src, action, id, query, title, body)
 }
 
 // DagmarMemory is dagmar's expertise-store LLM-Tool hook (ADR-0019 D2 / ADR-0017 §2).
@@ -113,5 +118,9 @@ func (m *Dagmar) DagmarMemory(
 	// +optional
 	value string,
 ) (string, error) {
-	return workflows.DagmarMemory(ctx, action, query, key, value)
+	src := m.Source
+	if src == nil {
+		src = dag.CurrentModule().Source()
+	}
+	return workflows.DagmarMemory(ctx, src, action, query, key, value)
 }
