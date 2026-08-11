@@ -138,23 +138,68 @@ func (r *RunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 			"Run.Spec.ModuleFunction and WorkflowRef are mutually exclusive (ADR-0016 §2)")
 	}
 
-	// 3c. Orchestration Runs (WorkflowRef): drive the pipeline (ADR-0016 §4).
-	// The controller creates and supervises atomic Sub-Runs. Atomic Runs (ModuleFunction)
-	// fall through to the engine-pod + agent-pod path below.
+	// Agent model + budget, resolved from either the AgentRef (atomic) or the
+	// Workflow's CoderAgentRef (orchestration). Declared here so both paths can set them.
+	var agentModel string
+	var agentMaxAPICalls int
+
+	// 3c. Orchestration Runs (WorkflowRef): dispatch the CognitionRun pipeline as a
+	// single agent pod (ADR-0027). The pipeline chains Prompt→Code→Gate→Review→Adjudicate
+	// internally — no Sub-Runs, no controller-level step orchestration.
 	if hasWf {
-		// Mark accepted, then orchestrate.
+		// Load the Workflow to resolve the coder Agent (model + maxAPICalls).
+		wf := &v1alpha1.Workflow{}
+		if err := r.Get(ctx, types.NamespacedName{Name: run.Spec.WorkflowRef, Namespace: run.Namespace}, wf); err != nil {
+			if errors.IsNotFound(err) {
+				return ctrl.Result{}, r.failRun(ctx, run, "WorkflowNotFound",
+					fmt.Sprintf("referenced Workflow %q not found", run.Spec.WorkflowRef))
+			}
+			return ctrl.Result{}, err
+		}
+
+		// Read the coder Agent for model + maxAPICalls (the pipeline uses one model/budget).
+		coderAgent := &v1alpha1.Agent{}
+		if err := r.Get(ctx, types.NamespacedName{Name: wf.Spec.CoderAgentRef, Namespace: run.Namespace}, coderAgent); err != nil {
+			return ctrl.Result{}, r.failRun(ctx, run, "CoderAgentNotFound",
+				fmt.Sprintf("Workflow %q references Agent %q not found", wf.Name, wf.Spec.CoderAgentRef))
+		}
+		agentModel = coderAgent.Spec.Model
+		agentMaxAPICalls = coderAgent.Spec.MaxAPICalls
+
+		// Generate a Collector token for this Run (ADR-0027 D3).
+		// The callback URL + token are injected as pod env vars.
+		// TODO: wire CollectorServer into the reconciler for token generation.
+		// For now, the pipeline runs without a callback (empty = standalone).
+
+		// Mark accepted.
 		_ = r.patchStatus(ctx, run, func(s *v1alpha1.RunStatus) {
 			gen := run.Generation
-			meta.SetStatusCondition(&s.Conditions, runCondition(v1alpha1.RunConditionAccepted, metav1.ConditionTrue, "OrchestrationMode", "orchestration Run accepted", gen))
+			meta.SetStatusCondition(&s.Conditions, runCondition(v1alpha1.RunConditionAccepted, metav1.ConditionTrue, "PipelineMode", "CognitionRun pipeline accepted", gen))
+			s.PipelinePhase = "dispatching"
 		})
-		return r.reconcileOrchestration(ctx, run, project)
+
+		// Set ModuleFunction + args so the existing agent-pod path dispatches cognition-run.
+		run.Spec.ModuleFunction = "cognition-run"
+		run.Spec.ModuleArgs = []string{
+			"--source", "/workspace",
+			"--task-context", shellQuote(run.Spec.TaskContext),
+			"--model", agentModel,
+			"--module-ref", project.Spec.ModuleRef,
+		}
+		if agentMaxAPICalls > 0 {
+			run.Spec.ModuleArgs = append(run.Spec.ModuleArgs, "--max-apicalls", fmt.Sprintf("%d", agentMaxAPICalls))
+		}
+		// coverageFloorBps is passed from the Project's CoveragePolicy.
+		if covFloor := coverageFloorFor(project); covFloor > 0 {
+			run.Spec.ModuleArgs = append(run.Spec.ModuleArgs, "--coverage-floor-bps", fmt.Sprintf("%d", covFloor))
+		}
+		// Fall through to the agent-pod path (below) — no return here.
+		// The existing path clones the workspace, installs dagger, and runs the function.
+		// No prompter chaining or gate chaining (the pipeline handles those internally).
 	}
 
 	// 3d. For atomic Runs with an AgentRef, read the Agent spec (model, maxAPICalls).
-	// The controller passes these as module args to the code() function. A missing
-	// Agent is a terminal config error (like a missing Project).
-	var agentModel string
-	var agentMaxAPICalls int
+	// (agentModel/agentMaxAPICalls are declared above; orchestration Runs already set them.)
 	if run.Spec.AgentRef != "" {
 		agent := &v1alpha1.Agent{}
 		if err := r.Get(ctx, types.NamespacedName{Name: run.Spec.AgentRef, Namespace: run.Namespace}, agent); err != nil {

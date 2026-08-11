@@ -2,10 +2,10 @@ package controller
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
 	"github.com/denkhaus/dagmar/api/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -73,480 +73,55 @@ func newTestOrchestrationReconciler(t *testing.T, run *v1alpha1.Run) (*RunReconc
 	return r, cl
 }
 
-func TestReconcile_OrchestrationCreatesCoderSubRun(t *testing.T) {
+// NEW TESTS (ADR-0027): orchestration Runs dispatch cognition-run as a single pod.
+
+func TestReconcile_OrchestrationDispatchesCognitionRun(t *testing.T) {
 	run := &v1alpha1.Run{
-		ObjectMeta: metav1.ObjectMeta{Name: "orch-1", Namespace: "default"},
+		ObjectMeta: metav1.ObjectMeta{Name: "orch-pipe-1", Namespace: "default"},
+		Spec: v1alpha1.RunSpec{
+			ProjectRef:  "test-proj",
+			WorkflowRef: "test-workflow",
+			TaskContext: "Implement feature X",
+		},
+	}
+	r, cl := newTestOrchestrationReconciler(t, run)
+
+	key := types.NamespacedName{Name: "orch-pipe-1", Namespace: "default"}
+	mustReconcile(t, ctx, r, ctrl.Request{NamespacedName: key})
+
+	// The pod should exist with the cognition-run command.
+	podName := "orch-pipe-1-agent"
+	pod := &corev1.Pod{}
+	if err := cl.Get(ctx, types.NamespacedName{Name: podName, Namespace: "default"}, pod); err != nil {
+		t.Fatalf("expected agent pod %q: %v", podName, err)
+	}
+	cmd := pod.Spec.Containers[0].Command[2]
+	assertContains(t, cmd, "cognition-run")
+	assertContains(t, cmd, "--task-context")
+	assertContains(t, cmd, "--model")
+}
+
+func TestReconcile_OrchestrationPipelineAccepted(t *testing.T) {
+	run := &v1alpha1.Run{
+		ObjectMeta: metav1.ObjectMeta{Name: "orch-pipe-2", Namespace: "default"},
 		Spec: v1alpha1.RunSpec{
 			ProjectRef:  "test-proj",
 			WorkflowRef: "test-workflow",
 		},
 	}
-	r, cl := newTestOrchestrationReconciler(t, run)
+	r, _ := newTestOrchestrationReconciler(t, run)
 
-	_, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: "orch-1", Namespace: "default"}})
-	if err != nil {
-		t.Fatalf("Reconcile: %v", err)
-	}
-
-	subName := subRunName("orch-1", "coder-r1")
-	sub := &v1alpha1.Run{}
-	if err := cl.Get(ctx, types.NamespacedName{Name: subName, Namespace: "default"}, sub); err != nil {
-		t.Fatalf("expected Sub-Run %q: %v", subName, err)
-	}
-	if sub.Spec.AgentRef != "coder-agent" {
-		t.Errorf("Sub-Run AgentRef = %q, want coder-agent", sub.Spec.AgentRef)
-	}
-	if sub.Spec.ModuleFunction != "code" {
-		t.Errorf("Sub-Run ModuleFunction = %q, want code", sub.Spec.ModuleFunction)
-	}
-	if sub.Spec.ParentRun != "orch-1" {
-		t.Errorf("Sub-Run ParentRun = %q, want orch-1", sub.Spec.ParentRun)
-	}
-	// Prompter annotations should be set on the coder Sub-Run.
-	if sub.Annotations[annPrompterPhase] != "pre-code" {
-		t.Errorf("prompter phase annotation = %q, want pre-code", sub.Annotations[annPrompterPhase])
-	}
-	if sub.Annotations[annPrompterModel] != "test-prompter-model" {
-		t.Errorf("prompter model annotation = %q, want test-prompter-model", sub.Annotations[annPrompterModel])
-	}
-}
-
-func TestReconcile_OrchestrationAdvancesToReviewing(t *testing.T) {
-	run := &v1alpha1.Run{
-		ObjectMeta: metav1.ObjectMeta{Name: "orch-2", Namespace: "default"},
-		Spec: v1alpha1.RunSpec{
-			ProjectRef:  "test-proj",
-			WorkflowRef: "test-workflow",
-		},
-	}
-	r, cl := newTestOrchestrationReconciler(t, run)
-
-	key := types.NamespacedName{Name: "orch-2", Namespace: "default"}
-
-	// First reconcile: creates coder Sub-Run.
+	key := types.NamespacedName{Name: "orch-pipe-2", Namespace: "default"}
 	mustReconcile(t, ctx, r, ctrl.Request{NamespacedName: key})
 
-	// Mark coder Sub-Run as Succeeded.
-	setRunStatusPhase(t, cl, types.NamespacedName{Name: subRunName("orch-2", "coder-r1"), Namespace: "default"}, v1alpha1.RunPhaseSucceeded)
-
-	// Reconcile until reviewing (coding→gating→reviewing, each step is a requeue).
-	reconcileUntil(t, r, cl, key, StateReviewing, 5)
-	// One more reconcile to create the reviewer Sub-Run (the phase is set before the Sub-Run).
-	mustReconcile(t, ctx, r, ctrl.Request{NamespacedName: key})
-
-	// Reviewer Sub-Run should exist.
-	reviewName := subRunName("orch-2", "review-r1")
-	review := &v1alpha1.Run{}
-	if err := cl.Get(ctx, types.NamespacedName{Name: reviewName, Namespace: "default"}, review); err != nil {
-		t.Fatalf("expected reviewer Sub-Run %q: %v", reviewName, err)
-	}
-	if review.Spec.AgentRef != "reviewer-agent" {
-		t.Errorf("reviewer AgentRef = %q, want reviewer-agent", review.Spec.AgentRef)
-	}
-	// Reviewer Sub-Run should have pre-review prompter annotations.
-	if review.Annotations[annPrompterPhase] != "pre-review" {
-		t.Errorf("prompter phase annotation = %q, want pre-review", review.Annotations[annPrompterPhase])
+	updated := &v1alpha1.Run{}
+	if err := r.Get(ctx, key, updated); err != nil {
+		t.Fatalf("get run: %v", err)
 	}
 
-	// Orchestration Run should be in PipelinePhase=reviewing.
-	updated := fetchRun(t, cl, types.NamespacedName{Name: "orch-2", Namespace: "default"})
-	if updated.Status.PipelinePhase != StateReviewing {
-		t.Errorf("PipelinePhase = %q, want %q", updated.Status.PipelinePhase, StateReviewing)
-	}
-}
-
-func TestReconcile_OrchestrationReachesDone(t *testing.T) {
-	run := &v1alpha1.Run{
-		ObjectMeta: metav1.ObjectMeta{Name: "orch-3", Namespace: "default"},
-		Spec: v1alpha1.RunSpec{
-			ProjectRef:  "test-proj",
-			WorkflowRef: "test-workflow",
-		},
-	}
-	r, cl := newTestOrchestrationReconciler(t, run)
-
-	key := types.NamespacedName{Name: "orch-3", Namespace: "default"}
-
-	// coder succeeds.
-	mustReconcile(t, ctx, r, ctrl.Request{NamespacedName: key})
-	setRunStatusPhase(t, cl, types.NamespacedName{Name: subRunName("orch-3", "coder-r1"), Namespace: "default"}, v1alpha1.RunPhaseSucceeded)
-	reconcileUntil(t, r, cl, key, StateReviewing, 5)
-	mustReconcile(t, ctx, r, ctrl.Request{NamespacedName: key})
-
-	// reviewer succeeds.
-	setRunStatusPhase(t, cl, types.NamespacedName{Name: subRunName("orch-3", "review-r1"), Namespace: "default"}, v1alpha1.RunPhaseSucceeded)
-	reconcileUntil(t, r, cl, key, StateDone, 5)
-
-	// Orchestration Run should be done (Succeeded).
-	updated := fetchRun(t, cl, key)
-	if updated.Status.PipelinePhase != StateDone {
-		t.Errorf("PipelinePhase = %q, want %q", updated.Status.PipelinePhase, StateDone)
-	}
-	if updated.Status.Phase != v1alpha1.RunPhaseSucceeded {
-		t.Errorf("Phase = %q, want %q", updated.Status.Phase, v1alpha1.RunPhaseSucceeded)
-	}
-}
-
-func TestReconcile_OrchestrationEscalatesAfterMaxRounds(t *testing.T) {
-	run := &v1alpha1.Run{
-		ObjectMeta: metav1.ObjectMeta{Name: "orch-4", Namespace: "default"},
-		Spec: v1alpha1.RunSpec{
-			ProjectRef:  "test-proj",
-			WorkflowRef: "test-workflow",
-		},
-	}
-	r, cl := newTestOrchestrationReconciler(t, run)
-
-	key := types.NamespacedName{Name: "orch-4", Namespace: "default"}
-
-	// Drive the pipeline: each coder round fails. The revise loop needs enough
-	// reconciles to create, fail, and process each round.
-	for i := 0; i < 20; i++ {
-		mustReconcile(t, ctx, r, ctrl.Request{NamespacedName: key})
-
-		// Mark any existing coder Sub-Run that is not yet Failed as Failed.
-		updated := fetchRun(t, cl, key)
-		if updated.Status.PipelinePhase == PipelineEscalated {
-			break
-		}
-		// Find the latest coder Sub-Run and fail it.
-		round := updated.Status.CurrentRound + 1
-		coderKey := types.NamespacedName{
-			Name:      subRunName("orch-4", fmt.Sprintf("coder-r%d", round)),
-			Namespace: "default",
-		}
-		coderRun := &v1alpha1.Run{}
-		if err := cl.Get(ctx, coderKey, coderRun); err == nil && coderRun.Status.Phase != v1alpha1.RunPhaseFailed {
-			setRunStatusPhase(t, cl, coderKey, v1alpha1.RunPhaseFailed)
-		}
-	}
-
-	updated := fetchRun(t, cl, key)
-	if updated.Status.PipelinePhase != PipelineEscalated {
-		t.Errorf("PipelinePhase = %q, want %q", updated.Status.PipelinePhase, PipelineEscalated)
-	}
-	if updated.Status.Phase != v1alpha1.RunPhaseFailed {
-		t.Errorf("Phase = %q, want %q", updated.Status.Phase, v1alpha1.RunPhaseFailed)
-	}
-}
-
-// TestReconcile_OrchestrationReviewerVetoEscalatesWithoutAdjudicator verifies that a
-// reviewer veto (fail) escalates to a human when no AdjudicatorAgentRef is configured.
-func TestReconcile_OrchestrationReviewerVetoEscalatesWithoutAdjudicator(t *testing.T) {
-	run := &v1alpha1.Run{
-		ObjectMeta: metav1.ObjectMeta{Name: "orch-veto-1", Namespace: "default"},
-		Spec: v1alpha1.RunSpec{
-			ProjectRef:  "test-proj",
-			WorkflowRef: "test-workflow",
-		},
-	}
-	r, cl := newTestOrchestrationReconciler(t, run)
-	key := types.NamespacedName{Name: "orch-veto-1", Namespace: "default"}
-
-	// coder succeeds.
-	mustReconcile(t, ctx, r, ctrl.Request{NamespacedName: key})
-	setRunStatusPhase(t, cl, types.NamespacedName{Name: subRunName("orch-veto-1", "coder-r1"), Namespace: "default"}, v1alpha1.RunPhaseSucceeded)
-	reconcileUntil(t, r, cl, key, StateReviewing, 5)
-	mustReconcile(t, ctx, r, ctrl.Request{NamespacedName: key})
-
-	// reviewer fails (veto).
-	setRunStatusPhase(t, cl, types.NamespacedName{Name: subRunName("orch-veto-1", "review-r1"), Namespace: "default"}, v1alpha1.RunPhaseFailed)
-	reconcileUntil(t, r, cl, key, StateEscalated, 5)
-
-	// Should escalate (no adjudicator configured in the default test workflow).
-	updated := fetchRun(t, cl, key)
-	if updated.Status.PipelinePhase != StateEscalated {
-		t.Errorf("PipelinePhase = %q, want %q (escalate on veto without adjudicator)", updated.Status.PipelinePhase, PipelineEscalated)
-	}
-	if updated.Status.Phase != v1alpha1.RunPhaseFailed {
-		t.Errorf("Phase = %q, want %q", updated.Status.Phase, v1alpha1.RunPhaseFailed)
-	}
-}
-
-// TestReconcile_OrchestrationReviewerVetoAdjudicates verifies that a reviewer veto
-// enters adjudication when AdjudicatorAgentRef is configured, and that adjudicator
-// success resolves to done.
-func TestReconcile_OrchestrationReviewerVetoAdjudicates(t *testing.T) {
-	r, cl := setupAdjudicatorTest(t, "orch-adj-1", true)
-
-	key := types.NamespacedName{Name: "orch-adj-1", Namespace: "default"}
-
-	// coder succeeds.
-	mustReconcile(t, ctx, r, ctrl.Request{NamespacedName: key})
-	setRunStatusPhase(t, cl, types.NamespacedName{Name: subRunName("orch-adj-1", "coder-r1"), Namespace: "default"}, v1alpha1.RunPhaseSucceeded)
-	reconcileUntil(t, r, cl, key, StateReviewing, 5)
-	mustReconcile(t, ctx, r, ctrl.Request{NamespacedName: key})
-
-	// reviewer fails (veto).
-	setRunStatusPhase(t, cl, types.NamespacedName{Name: subRunName("orch-adj-1", "review-r1"), Namespace: "default"}, v1alpha1.RunPhaseFailed)
-	reconcileUntil(t, r, cl, key, StateAdjudicating, 5)
-	mustReconcile(t, ctx, r, ctrl.Request{NamespacedName: key})
-
-	// Should enter adjudicating (adjudicator configured).
-	updated := fetchRun(t, cl, key)
-	if updated.Status.PipelinePhase != StateAdjudicating {
-		t.Fatalf("PipelinePhase = %q, want %q", updated.Status.PipelinePhase, PipelineAdjudicating)
-	}
-
-	// Adjudicator Sub-Run should exist.
-	adjName := subRunName("orch-adj-1", "adjudicate-r1")
-	adj := &v1alpha1.Run{}
-	if err := cl.Get(ctx, types.NamespacedName{Name: adjName, Namespace: "default"}, adj); err != nil {
-		t.Fatalf("expected adjudicator Sub-Run %q: %v", adjName, err)
-	}
-	if adj.Spec.AgentRef != "adjudicator-agent" {
-		t.Errorf("adjudicator AgentRef = %q, want adjudicator-agent", adj.Spec.AgentRef)
-	}
-
-	// Adjudicator succeeds → conflict resolved → done.
-	setRunStatusPhase(t, cl, types.NamespacedName{Name: adjName, Namespace: "default"}, v1alpha1.RunPhaseSucceeded)
-	reconcileUntil(t, r, cl, key, StateDone, 5)
-
-	updated = fetchRun(t, cl, key)
-	if updated.Status.PipelinePhase != StateDone {
-		t.Errorf("PipelinePhase = %q, want %q (adjudicator resolved)", updated.Status.PipelinePhase, StateDone)
-	}
-	if updated.Status.Phase != v1alpha1.RunPhaseSucceeded {
-		t.Errorf("Phase = %q, want %q", updated.Status.Phase, v1alpha1.RunPhaseSucceeded)
-	}
-}
-
-// TestReconcile_OrchestrationAdjudicatorFailEscalates verifies that adjudicator
-// failure escalates.
-func TestReconcile_OrchestrationAdjudicatorFailEscalates(t *testing.T) {
-	r, cl := setupAdjudicatorTest(t, "orch-adj-2", true)
-
-	key := types.NamespacedName{Name: "orch-adj-2", Namespace: "default"}
-
-	// coder succeeds.
-	mustReconcile(t, ctx, r, ctrl.Request{NamespacedName: key})
-	setRunStatusPhase(t, cl, types.NamespacedName{Name: subRunName("orch-adj-2", "coder-r1"), Namespace: "default"}, v1alpha1.RunPhaseSucceeded)
-	reconcileUntil(t, r, cl, key, StateReviewing, 5)
-	mustReconcile(t, ctx, r, ctrl.Request{NamespacedName: key})
-
-	// reviewer fails (veto).
-	setRunStatusPhase(t, cl, types.NamespacedName{Name: subRunName("orch-adj-2", "review-r1"), Namespace: "default"}, v1alpha1.RunPhaseFailed)
-	reconcileUntil(t, r, cl, key, StateAdjudicating, 5)
-	mustReconcile(t, ctx, r, ctrl.Request{NamespacedName: key})
-
-	// Adjudicator fails → escalate.
-	adjName := subRunName("orch-adj-2", "adjudicate-r1")
-	setRunStatusPhase(t, cl, types.NamespacedName{Name: adjName, Namespace: "default"}, v1alpha1.RunPhaseFailed)
-	reconcileUntil(t, r, cl, key, StateEscalated, 5)
-
-	updated := fetchRun(t, cl, key)
-	if updated.Status.PipelinePhase != StateEscalated {
-		t.Errorf("PipelinePhase = %q, want %q (adjudicator unresolvable)", updated.Status.PipelinePhase, PipelineEscalated)
-	}
-}
-
-// setupAdjudicatorTest creates a reconciler with a workflow that has an AdjudicatorAgentRef.
-func setupAdjudicatorTest(t *testing.T, runName string, _ bool) (*RunReconciler, client.Client) {
-	t.Helper()
-	run := &v1alpha1.Run{
-		ObjectMeta: metav1.ObjectMeta{Name: runName, Namespace: "default"},
-		Spec: v1alpha1.RunSpec{
-			ProjectRef:  "test-proj",
-			WorkflowRef: "test-workflow-adj",
-		},
-	}
-	r, cl := newTestReconciler(t, run)
-
-	coderAgent := &v1alpha1.Agent{
-		ObjectMeta: metav1.ObjectMeta{Name: "coder-agent", Namespace: "default"},
-		Spec:       v1alpha1.AgentSpec{Model: "test-model", MaxAPICalls: 50},
-	}
-	prompterAgent := &v1alpha1.Agent{
-		ObjectMeta: metav1.ObjectMeta{Name: "prompter-agent", Namespace: "default"},
-		Spec:       v1alpha1.AgentSpec{Model: "test-prompter-model", MaxAPICalls: 10},
-	}
-	reviewerAgent := &v1alpha1.Agent{
-		ObjectMeta: metav1.ObjectMeta{Name: "reviewer-agent", Namespace: "default"},
-		Spec:       v1alpha1.AgentSpec{Model: "test-model", MaxAPICalls: 30},
-	}
-	adjudicatorAgent := &v1alpha1.Agent{
-		ObjectMeta: metav1.ObjectMeta{Name: "adjudicator-agent", Namespace: "default"},
-		Spec:       v1alpha1.AgentSpec{Model: "test-adjudicator-model", MaxAPICalls: 40},
-	}
-	// Workflow with adjudicator configured.
-	wf := &v1alpha1.Workflow{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-workflow-adj", Namespace: "default"},
-		Spec: v1alpha1.WorkflowSpec{
-			CoderAgentRef:       "coder-agent",
-			PrompterAgentRef:    "prompter-agent",
-			ReviewerAgentRef:    "reviewer-agent",
-			AdjudicatorAgentRef: "adjudicator-agent",
-			QualityGateRef:      "test-gate",
-			RequiresTwoGreen:    true,
-		},
-	}
-	project := &v1alpha1.Project{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-proj", Namespace: "default"},
-		Spec: v1alpha1.ProjectSpec{
-			Repo:          "https://github.com/test/repo",
-			AgentPodImage: "alpine:3.20",
-			ModuleRef:     "github.com/test/repo/.dagger",
-		},
-	}
-	for _, obj := range []client.Object{coderAgent, prompterAgent, reviewerAgent, adjudicatorAgent, wf, project} {
-		if err := cl.Create(ctx, obj); err != nil {
-			t.Fatalf("create %T: %v", obj, err)
-		}
-	}
-	return r, cl
-}
-
-// reconcileUntil repeatedly reconciles until the run's PipelinePhase reaches targetPhase,
-// or gives up after maxSteps (prevents infinite loops in tests). Simulates the controller-runtime
-// requeue behavior: each FSM transition returns Requeue:true, so the next Reconcile processes
-// the new state.
-func reconcileUntil(t *testing.T, r *RunReconciler, cl client.Client, key types.NamespacedName, targetPhase string, maxSteps int) {
-	t.Helper()
-	for i := 0; i < maxSteps; i++ {
-		mustReconcile(t, ctx, r, ctrl.Request{NamespacedName: key})
-		run := fetchRun(t, cl, key)
-		if run.Status.PipelinePhase == targetPhase {
-			return
-		}
-		if run.Status.PipelinePhase == StateEscalated || run.Status.PipelinePhase == StateDone {
-			if targetPhase != StateEscalated && targetPhase != StateDone {
-				t.Fatalf("pipeline reached %q before %q after %d steps", run.Status.PipelinePhase, targetPhase, i+1)
-			}
-			return
-		}
-	}
-	t.Fatalf("pipeline did not reach %q after %d steps", targetPhase, maxSteps)
-}
-
-// setRunStatusPhase patches a Run's status phase (for test simulation).
-func setRunStatusPhase(t *testing.T, cl client.Client, key types.NamespacedName, phase string) {
-	t.Helper()
-	run := &v1alpha1.Run{}
-	if err := cl.Get(ctx, key, run); err != nil {
-		t.Fatalf("get run %v: %v", key, err)
-	}
-	base := run.DeepCopy()
-	run.Status.Phase = phase
-	if err := cl.Status().Patch(ctx, run, client.MergeFrom(base)); err != nil {
-		t.Fatalf("patch run status: %v", err)
-	}
-}
-
-// setProjectCoveragePolicy patches a Project to add a CoveragePolicy (spec) and
-// optionally a CoverageFloor status value (for test setup). Spec and status are
-// patched separately because the status subresource only applies status changes.
-func setProjectCoveragePolicy(t *testing.T, cl client.Client, key types.NamespacedName, policy *v1alpha1.CoveragePolicy, floorBps int) {
-	t.Helper()
-	// Spec change (CoveragePolicy).
-	proj := &v1alpha1.Project{}
-	if err := cl.Get(ctx, key, proj); err != nil {
-		t.Fatalf("get project %v: %v", key, err)
-	}
-	specBase := proj.DeepCopy()
-	proj.Spec.CoveragePolicy = policy
-	if err := cl.Patch(ctx, proj, client.MergeFrom(specBase)); err != nil {
-		t.Fatalf("patch project spec: %v", err)
-	}
-	// Status change (CoverageFloor).
-	statusBase := proj.DeepCopy()
-	proj.Status.CoverageFloor = floorBps
-	if err := cl.Status().Patch(ctx, proj, client.MergeFrom(statusBase)); err != nil {
-		t.Fatalf("patch project status: %v", err)
-	}
-}
-
-// TestReconcile_CoverageFloorAnnotation verifies that when CoveragePolicy is
-// enabled on the Project, the coder Sub-Run is annotated with the coverage floor.
-func TestReconcile_CoverageFloorAnnotation(t *testing.T) {
-	run := &v1alpha1.Run{
-		ObjectMeta: metav1.ObjectMeta{Name: "cov-1", Namespace: "default"},
-		Spec: v1alpha1.RunSpec{
-			ProjectRef:  "test-proj",
-			WorkflowRef: "test-workflow",
-		},
-	}
-	r, cl := newTestOrchestrationReconciler(t, run)
-
-	// Enable CoveragePolicy and set a floor on the project created by the harness.
-	setProjectCoveragePolicy(t, cl,
-		types.NamespacedName{Name: "test-proj", Namespace: "default"},
-		&v1alpha1.CoveragePolicy{Enabled: true, MinimumFloor: 5000, RatchetMargin: 200},
-		7850)
-
-	mustReconcile(t, ctx, r, ctrl.Request{NamespacedName: types.NamespacedName{Name: "cov-1", Namespace: "default"}})
-
-	// Coder Sub-Run should have the coverage-floor annotation.
-	subName := subRunName("cov-1", "coder-r1")
-	sub := &v1alpha1.Run{}
-	if err := cl.Get(ctx, types.NamespacedName{Name: subName, Namespace: "default"}, sub); err != nil {
-		t.Fatalf("expected coder Sub-Run %q: %v", subName, err)
-	}
-	if got := sub.Annotations[annCoverageFloor]; got != "7850" {
-		t.Errorf("coverage-floor annotation = %q, want 7850", got)
-	}
-}
-
-// TestReconcile_CoverageFloorNotSetWhenDisabled verifies that no coverage-floor
-// annotation is set when CoveragePolicy is not enabled.
-func TestReconcile_CoverageFloorNotSetWhenDisabled(t *testing.T) {
-	run := &v1alpha1.Run{
-		ObjectMeta: metav1.ObjectMeta{Name: "cov-2", Namespace: "default"},
-		Spec: v1alpha1.RunSpec{
-			ProjectRef:  "test-proj",
-			WorkflowRef: "test-workflow",
-		},
-	}
-	r, cl := newTestOrchestrationReconciler(t, run)
-
-	// No CoveragePolicy set — default is nil (disabled).
-
-	mustReconcile(t, ctx, r, ctrl.Request{NamespacedName: types.NamespacedName{Name: "cov-2", Namespace: "default"}})
-
-	subName := subRunName("cov-2", "coder-r1")
-	sub := &v1alpha1.Run{}
-	if err := cl.Get(ctx, types.NamespacedName{Name: subName, Namespace: "default"}, sub); err != nil {
-		t.Fatalf("expected coder Sub-Run %q: %v", subName, err)
-	}
-	if _, ok := sub.Annotations[annCoverageFloor]; ok {
-		t.Errorf("coverage-floor annotation should not be set when CoveragePolicy is disabled")
-	}
-}
-
-// TestReconcile_CoverageFloorRatcheting verifies that on the first successful
-// gate with CoveragePolicy enabled and floor 0, the controller sets the floor
-// to MinimumFloor.
-func TestReconcile_CoverageFloorRatcheting(t *testing.T) {
-	run := &v1alpha1.Run{
-		ObjectMeta: metav1.ObjectMeta{Name: "cov-3", Namespace: "default"},
-		Spec: v1alpha1.RunSpec{
-			ProjectRef:  "test-proj",
-			WorkflowRef: "test-workflow",
-		},
-	}
-	r, cl := newTestOrchestrationReconciler(t, run)
-
-	// Enable CoveragePolicy with MinimumFloor=6000, but leave floor at 0.
-	setProjectCoveragePolicy(t, cl,
-		types.NamespacedName{Name: "test-proj", Namespace: "default"},
-		&v1alpha1.CoveragePolicy{Enabled: true, MinimumFloor: 6000, RatchetMargin: 200},
-		0)
-
-	key := types.NamespacedName{Name: "cov-3", Namespace: "default"}
-	projKey := types.NamespacedName{Name: "test-proj", Namespace: "default"}
-
-	// coder succeeds → gating → ratcheting.
-	mustReconcile(t, ctx, r, ctrl.Request{NamespacedName: key})
-	setRunStatusPhase(t, cl, types.NamespacedName{Name: subRunName("cov-3", "coder-r1"), Namespace: "default"}, v1alpha1.RunPhaseSucceeded)
-	// Need multiple reconciles: coding→gating (requeue) then gating→reviewing (requeue, does ratcheting).
-	reconcileUntil(t, r, cl, key, StateReviewing, 5)
-	mustReconcile(t, ctx, r, ctrl.Request{NamespacedName: key})
-
-	// The project's CoverageFloor should now be MinimumFloor.
-	updated := &v1alpha1.Project{}
-	if err := cl.Get(ctx, projKey, updated); err != nil {
-		t.Fatalf("get project: %v", err)
-	}
-	if updated.Status.CoverageFloor != 6000 {
-		t.Errorf("CoverageFloor = %d, want 6000 (MinimumFloor)", updated.Status.CoverageFloor)
+	// PipelinePhase should be dispatching or running (not the old step-level phases).
+	phase := updated.Status.PipelinePhase
+	if phase == "coding" || phase == "gating" || phase == "reviewing" || phase == "adjudicating" {
+		t.Errorf("PipelinePhase = %q (step-level), expected policy-level (dispatching/running)", phase)
 	}
 }
