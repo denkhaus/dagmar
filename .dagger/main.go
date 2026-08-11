@@ -238,6 +238,60 @@ func (m *Dagmar) Review(
 	return rawJSON, nil
 }
 
+// CognitionRun is dagmar's cognition pipeline entry point (ADR-0027). It chains
+// Prompt → Code → Gate → Review → Adjudicate as Go-method calls within a single
+// Dagger function — the greetings-api pattern. Internal revise loops preserve the
+// coder's LLM context (gate-red → re-code, same agent context).
+//
+// The pipeline returns a structured JSON string the controller parses for policy
+// decisions (done / retry / escalate). Step results are pushed to the controller's
+// Collector HTTP endpoint when --callback-url is set (ADR-0027 D3).
+//
+// This replaces the multi-Sub-Run orchestration (ADR-0026 step-level FSM) with a
+// single pipeline call (ADR-0027 policy-level FSM).
+func (m *Dagmar) CognitionRun(
+	ctx context.Context,
+	// source is the project source directory.
+	source *dagger.Directory,
+	// taskContext is the issue text / task description.
+	taskContext string,
+	// model is the LLM model identifier.
+	// +optional
+	// +default="anthropic/claude-sonnet-4"
+	model string,
+	// maxAPICalls bounds the total LLM API calls for the pipeline.
+	// +optional
+	// +default=100
+	maxAPICalls int,
+	// moduleRef is the project module reference (registers dagmar-issues + dagmar-memory).
+	// +optional
+	// +default=".dagmar"
+	moduleRef string,
+	// coverageFloorBps is the ratcheted coverage floor (0 = disabled).
+	// +optional
+	// +default=0
+	coverageFloorBps int,
+	// maxRevise bounds the code→gate→revise iterations (0 = default 3).
+	// +optional
+	// +default=3
+	maxRevise int,
+	// callbackURL is the controller's Collector endpoint for step-result pushes.
+	// Empty = no Collector (pipeline runs standalone, testable without controller).
+	// +optional
+	// +default=""
+	callbackURL string,
+	// callbackToken is the Bearer token for Collector auth.
+	// +optional
+	// +default=""
+	callbackToken string,
+) (string, error) {
+	src := source
+	if src == nil {
+		src = m.Project
+	}
+	return app.CognitionRun(ctx, src, taskContext, model, maxAPICalls, moduleRef, coverageFloorBps, maxRevise, callbackURL, callbackToken)
+}
+
 // Diff computes the difference between a pre-Loop and post-Loop workspace (ADR-0021 D8).
 // The controller calls this after Code() to extract the agent's changes for the PR flow
 // (ADR-0020 D3). Returns a Directory containing only the changed files.

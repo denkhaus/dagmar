@@ -310,6 +310,76 @@ func invoke(ctx context.Context, parentJSON []byte, parentName string, fnName st
 				}
 			}
 			return (*Dagmar).Code(&parent, ctx, source, promptFile, model, maxApicalls, moduleRef)
+		case "CognitionRun":
+			var parent Dagmar
+			err = json.Unmarshal(parentJSON, &parent)
+			if err != nil {
+				panic(fmt.Errorf("%s: %w", "failed to unmarshal parent object", err))
+			}
+			var source *dagger.Directory
+			if inputArgs["source"] != nil {
+				err = json.Unmarshal([]byte(inputArgs["source"]), &source)
+				if err != nil {
+					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg source", err))
+				}
+			}
+			var taskContext string
+			if inputArgs["taskContext"] != nil {
+				err = json.Unmarshal([]byte(inputArgs["taskContext"]), &taskContext)
+				if err != nil {
+					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg taskContext", err))
+				}
+			}
+			var model string
+			if inputArgs["model"] != nil {
+				err = json.Unmarshal([]byte(inputArgs["model"]), &model)
+				if err != nil {
+					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg model", err))
+				}
+			}
+			var maxApicalls int
+			if inputArgs["maxAPICalls"] != nil {
+				err = json.Unmarshal([]byte(inputArgs["maxAPICalls"]), &maxApicalls)
+				if err != nil {
+					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg maxAPICalls", err))
+				}
+			}
+			var moduleRef string
+			if inputArgs["moduleRef"] != nil {
+				err = json.Unmarshal([]byte(inputArgs["moduleRef"]), &moduleRef)
+				if err != nil {
+					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg moduleRef", err))
+				}
+			}
+			var coverageFloorBps int
+			if inputArgs["coverageFloorBps"] != nil {
+				err = json.Unmarshal([]byte(inputArgs["coverageFloorBps"]), &coverageFloorBps)
+				if err != nil {
+					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg coverageFloorBps", err))
+				}
+			}
+			var maxRevise int
+			if inputArgs["maxRevise"] != nil {
+				err = json.Unmarshal([]byte(inputArgs["maxRevise"]), &maxRevise)
+				if err != nil {
+					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg maxRevise", err))
+				}
+			}
+			var callbackUrl string
+			if inputArgs["callbackURL"] != nil {
+				err = json.Unmarshal([]byte(inputArgs["callbackURL"]), &callbackUrl)
+				if err != nil {
+					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg callbackURL", err))
+				}
+			}
+			var callbackToken string
+			if inputArgs["callbackToken"] != nil {
+				err = json.Unmarshal([]byte(inputArgs["callbackToken"]), &callbackToken)
+				if err != nil {
+					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg callbackToken", err))
+				}
+			}
+			return (*Dagmar).CognitionRun(&parent, ctx, source, taskContext, model, maxApicalls, moduleRef, coverageFloorBps, maxRevise, callbackUrl, callbackToken)
 		case "Diff":
 			var parent Dagmar
 			err = json.Unmarshal(parentJSON, &parent)
@@ -380,6 +450,48 @@ func invoke(ctx context.Context, parentJSON []byte, parentName string, fnName st
 				}
 			}
 			return (*Dagmar).Prompt(&parent, ctx, source, phase, taskContext, model, maxApicalls, moduleRef)
+		case "Review":
+			var parent Dagmar
+			err = json.Unmarshal(parentJSON, &parent)
+			if err != nil {
+				panic(fmt.Errorf("%s: %w", "failed to unmarshal parent object", err))
+			}
+			var source *dagger.Directory
+			if inputArgs["source"] != nil {
+				err = json.Unmarshal([]byte(inputArgs["source"]), &source)
+				if err != nil {
+					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg source", err))
+				}
+			}
+			var promptFile *dagger.File
+			if inputArgs["promptFile"] != nil {
+				err = json.Unmarshal([]byte(inputArgs["promptFile"]), &promptFile)
+				if err != nil {
+					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg promptFile", err))
+				}
+			}
+			var model string
+			if inputArgs["model"] != nil {
+				err = json.Unmarshal([]byte(inputArgs["model"]), &model)
+				if err != nil {
+					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg model", err))
+				}
+			}
+			var maxApicalls int
+			if inputArgs["maxAPICalls"] != nil {
+				err = json.Unmarshal([]byte(inputArgs["maxAPICalls"]), &maxApicalls)
+				if err != nil {
+					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg maxAPICalls", err))
+				}
+			}
+			var moduleRef string
+			if inputArgs["moduleRef"] != nil {
+				err = json.Unmarshal([]byte(inputArgs["moduleRef"]), &moduleRef)
+				if err != nil {
+					panic(fmt.Errorf("%s: %w", "failed to unmarshal input arg moduleRef", err))
+				}
+			}
+			return (*Dagmar).Review(&parent, ctx, source, promptFile, model, maxApicalls, moduleRef)
 		case "Sandbox":
 			var parent Dagmar
 			err = json.Unmarshal(parentJSON, &parent)
