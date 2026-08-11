@@ -27,21 +27,21 @@ Each LLM role receives a specific Env construction and tool-surface. All roles a
 The Privileged flag (ADR-0022) grants core API access (Directory, File) — this is accepted as the
 Phase 2 interim position.
 
-| Role | Privileged | Writable | dir I/O | dagmar-issues | dagmar-memory | dagmar-gate | Purpose |
-|------|-----------|----------|---------|---------------|---------------|-------------|---------|
-| **Prompter** | ✅ | ❌ | read | read, search | read, search | ❌ | Synthesize tailored prompts from project context |
-| **Coder** | ✅ | ✅ | read+write | read, search | read, search | ✅ (self-verify) | Implement code changes; self-verify via gate |
-| **Reviewer** | ✅ | ❌ | read | read, search | read, search | ❌ | Read code changes; approve or veto |
-| **Adjudicator** | ✅ | ❌ | read | read, search | read, search | ❌ | Investigate gate↔reviewer disagreement; resolve or escalate |
+| Role | Privileged | Writable | dir I/O | Container | dagmar-issues | dagmar-memory | dagmar-gate | dagmar-bootstrap | Purpose |
+|------|-----------|----------|---------|----------|---------------|---------------|-------------|-----------------|---------|
+| **Prompter** | ✅ | ❌ | read | ❌ blocked | read, search | read, search | ❌ blocked | ❌ blocked | Synthesize tailored prompts from project context |
+| **Coder** | ✅ | ✅ | read+write | ✅ (go build) | read, search | read, search | ❌ blocked | ❌ blocked | Implement code changes |
+| **Reviewer** | ✅ | ❌ | read | ❌ blocked | read, search | read, search | ❌ blocked | ❌ blocked | Read code changes; approve or veto |
+| **Adjudicator** | ✅ | ❌ | read | ❌ blocked | read, search | read, search | ❌ blocked | ❌ blocked | Investigate gate↔reviewer disagreement |
 
 **Justification per role:**
 
 - **Prompter** — read-only (ADR-0023 D1): it reads source + hooks to synthesize a prompt, never
   modifies anything.
 - **Coder** — writable (ADR-0021 D2): it modifies the workspace and saves the result. Gets
-  `dagmar-gate` for in-loop self-verification (ADR-0011 §2 carve-out: named Dagger function ≠
-  raw container tool). Gets `dagmar-issues`/`dagmar-memory` to ground its work in real project
-  context.
+  `dagmar-issues`/`dagmar-memory` to ground its work in real project context. Keeps Container
+  for `go build` verification (build only — no test/lint, per the coder meta-prompt). Gate
+  feedback flows through the revise loop, not in-loop self-verification (D5).
 - **Reviewer** — read-only (ADR-0023 D5): the reviewer reads the coder's diff and applies review
   criteria. It must NOT modify code (separation of concerns, ADR-0006 two-green model). Gets
   `dagmar-issues`/`dagmar-memory` to apply project-specific review guidance.
@@ -92,14 +92,59 @@ and `code` for coder Sub-Runs.
 
 This resolves the existing drift where the reviewer gets write access it should not have.
 
-### D5 — Implementation sequence
+### D5 — Tool-surface enforcement via WithBlockedFunction
 
-1. **dagmar-issues + dagmar-memory hooks** (this ADR + ADR-0019 D2) — implemented in `.dagmar/`
-   module, registered via `WithMainModule`.
-2. **review() function** (D4) — new function on `.dagger/`, read-only Env.
-3. **Controller wiring** — reviewer Sub-Runs dispatch `review` instead of `code`.
-4. **Tool-set enforcement** — `WithBlockedFunction` to restrict write actions on issues/memory
-   (Phase 3, when the API is stable).
+Dagger v0.21.8 exposes `LLM.WithBlockedFunction(typeName, function)` — a blacklist API that
+removes specific functions from the LLM's tool surface after `WithMainModule` has registered
+them all. There is **no whitelist API**: `WithMainModule` always registers every function, and
+undesired ones must be individually blocked.
+
+A centralized `blockForRole(llm, role)` function in `.dagger/internal/app/tools.go` applies
+the per-role blocks:
+
+```go
+func blockForRole(llm *dagger.LLM, role Role) *dagger.LLM {
+    // Every LLM role: block infrastructure + gate functions.
+    llm = llm.WithBlockedFunction("Dagmar", "dagmarBootstrap").
+        WithBlockedFunction("Dagmar", "dagmarGate")
+
+    // Read-only roles: block Container.withExec (no network exec).
+    if role != RoleCoder {
+        llm = llm.WithBlockedFunction("Container", "withExec")
+    }
+    return llm
+}
+```
+
+**Why `dagmar-gate` is blocked for all LLM roles:** ADR-0023 D5 defines the gate as a
+deterministic post-loop pipeline step (step 3), dispatched by the controller — not an in-loop
+LLM tool. The controller is the authority over gate results (termination message → controller
+parses GateResult JSON). An in-loop gate call would (a) cost LLM API calls for build/test
+execution, (b) be skippable by the LLM, and (c) duplicate the deterministic gate step.
+Coder feedback on gate-RED flows through the revise loop (new coder round with gate result),
+not through in-loop self-verification.
+
+**Why `dagmar-bootstrap` is blocked for all LLM roles:** bootstrap is infrastructure setup
+(mise toolchain rollout) — a deterministic step invoked by the controller or CI before the
+Run starts. It is never an LLM concern.
+
+**Why `Container.withExec` is blocked for read-only roles:** the prompter, reviewer, and
+adjudicator only read files via the core Dagger API (Directory, File). They must not execute
+containers — `Container.WithExec()` always has outbound network (ADR-0011 ProbeNet). The coder
+keeps Container because it needs `go build` for compilation verification.
+
+This supersedes ADR-0011 §2's "carve-out" (which assumed in-loop gate calls) and ADR-0021 D6's
+"env.Checks() self-verification" (which assumed the LLM runs the gate in-loop). The gate is
+now exclusively a deterministic controller step.
+
+### D6 — Implementation sequence
+
+1. **dagmar-issues + dagmar-memory hooks** (this ADR + ADR-0019 D2) — ✅ implemented.
+2. **blockForRole** (D5) — ✅ implemented in `.dagger/internal/app/tools.go`.
+3. **review() function** (D4) — new function on `.dagger/`, read-only Env + RoleReviewer blocks.
+4. **Controller wiring** — reviewer Sub-Runs dispatch `review` instead of `code`.
+5. **dagmar-issues/memory write restrictions** — block create/update/write actions via
+   `WithBlockedFunction` on sub-functions (Phase 3).
 
 ## Consequences
 

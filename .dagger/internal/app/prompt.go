@@ -103,7 +103,11 @@ func Prompt(
 		WithPrompt(metaPrompt).
 		WithPrompt(taskContext)
 
-	// 5. Block on the Loop — the prompter reads files, calls tools, and synthesizes.
+	// 5. Apply per-role tool-surface policy (ADR-0024): block dagmar-bootstrap,
+	// dagmar-gate, and Container (prompter is read-only — no container exec).
+	llm = blockForRole(llm, RolePrompter)
+
+	// 6. Block on the Loop — the prompter reads files, calls tools, and synthesizes.
 	llm = llm.Loop()
 	if _, err := llm.Sync(ctx); err != nil {
 		return "", fmt.Errorf("prompt: loop failed: %w", err)

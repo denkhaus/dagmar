@@ -73,7 +73,11 @@ func Code(
 		WithEnv(env).
 		WithPromptFile(promptFile)
 
-	// 4. Block on the Loop — the agent works until done or budget exhausted.
+	// 4. Apply per-role tool-surface policy (ADR-0024): block dagmar-bootstrap,
+	// dagmar-gate (deterministic controller steps), keep Container (go build).
+	llm = blockForRole(llm, RoleCoder)
+
+	// 5. Block on the Loop — the agent works until done or budget exhausted.
 	llm = llm.Loop()
 	if _, err := llm.Sync(ctx); err != nil {
 		return nil, fmt.Errorf("code: loop failed: %w", err)

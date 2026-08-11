@@ -111,7 +111,11 @@ func Adjudicate(
 		WithPrompt(metaPrompt).
 		WithPrompt(disagreementContext)
 
-	// 6. Block on the Loop — the Adjudicator reads files, calls tools, and reasons.
+	// 6. Apply per-role tool-surface policy (ADR-0024): block dagmar-bootstrap,
+	// dagmar-gate, and Container (adjudicator is read-only — no container exec).
+	llm = blockForRole(llm, RoleAdjudicator)
+
+	// 7. Block on the Loop — the Adjudicator reads files, calls tools, and reasons.
 	llm = llm.Loop()
 	if _, err := llm.Sync(ctx); err != nil {
 		return "", fmt.Errorf("adjudicate: loop failed: %w", err)
