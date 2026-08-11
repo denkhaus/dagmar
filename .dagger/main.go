@@ -201,6 +201,43 @@ func (m *Dagmar) Adjudicate(
 	return app.Adjudicate(ctx, src, gateResult, reviewResult, taskContext, model, maxAPICalls, moduleRef)
 }
 
+// Review is dagmar's reviewer-loop entry point (ADR-0024 D4). The reviewer reads the
+// coder's workspace, applies review criteria from the prompt, and returns a structured
+// JSON verdict (approve/veto + rationale). Unlike Code(), Review is read-only (no
+// Writable, no DirectoryOutput) and returns a JSON string, not a Directory.
+//
+// The controller dispatches this via `dagger call -m .dagger review --source <dir> ...`.
+// The output is a JSON string the controller parses for the approve/veto decision
+// (ADR-0025: structured JSON output via WithJSONValueOutput, not termination-log).
+func (m *Dagmar) Review(
+	ctx context.Context,
+	// source is the workspace Directory — the project source the reviewer reads
+	// (read-only: the reviewer does NOT modify code).
+	source *dagger.Directory,
+	// promptFile is the pre-synthesized reviewer prompt (from the chained prompter
+	// with phase "pre-review"). Contains the review criteria + task context.
+	promptFile *dagger.File,
+	// model is the LLM model identifier.
+	// +optional
+	// +default="anthropic/claude-sonnet-4"
+	model string,
+	// maxAPICalls bounds the LLM API calls for this review Run.
+	// +optional
+	// +default=50
+	maxAPICalls int,
+	// moduleRef is the project module reference (registers dagmar-issues + dagmar-memory).
+	// +optional
+	// +default=".dagmar"
+	moduleRef string,
+) (string, error) {
+	verdict, rawJSON, err := app.Review(ctx, source, promptFile, model, maxAPICalls, moduleRef)
+	if err != nil {
+		return rawJSON, err
+	}
+	_ = verdict // parsed struct available if needed by the caller
+	return rawJSON, nil
+}
+
 // Diff computes the difference between a pre-Loop and post-Loop workspace (ADR-0021 D8).
 // The controller calls this after Code() to extract the agent's changes for the PR flow
 // (ADR-0020 D3). Returns a Directory containing only the changed files.

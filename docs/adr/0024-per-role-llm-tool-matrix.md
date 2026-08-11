@@ -83,14 +83,21 @@ meta-prompts instruct the LLM to use read/search only.
 In Phase 2, expertise is read-only for all roles — the coder focuses on code changes, not on
 updating the knowledge base.
 
-### D4 — The reviewer needs its own function
+### D4 — The reviewer has its own function (Review)
 
-The reviewer currently reuses `code()` (writable). Per this matrix, the reviewer needs a
-read-only function. A `review()` function (or a `code()` variant with `Writable: false`) must be
-added to the `.dagger` platform module. The controller dispatches `review` for reviewer Sub-Runs
-and `code` for coder Sub-Runs.
+The reviewer has a dedicated `Review()` function on the `.dagger` platform module (Q5=a). Unlike
+`Code()`, it is read-only (no `Writable`, no `DirectoryOutput`) and returns a structured JSON
+verdict via `WithJSONValueOutput` (ADR-0025). The controller dispatches `review` for reviewer
+Sub-Runs and `code` for coder Sub-Runs.
 
-This resolves the existing drift where the reviewer gets write access it should not have.
+The `Review()` function:
+- Builds a read-only Env (Privileged, not Writable).
+- Declares `WithJSONValueOutput("verdict", schema)`.
+- Applies `blockForRole(llm, RoleReviewer)` (blocks gate, bootstrap, Container.withExec).
+- Extracts the verdict via `extractJSONOutput` with retry (ADR-0025 D2).
+- Returns a `ReviewVerdict{Decision, Rationale, Issues}` struct.
+
+Controller wiring (dispatch `review` instead of `code` for reviewer Sub-Runs) is pending.
 
 ### D5 — Tool-surface enforcement via WithBlockedFunction
 
@@ -141,9 +148,10 @@ now exclusively a deterministic controller step.
 
 1. **dagmar-issues + dagmar-memory hooks** (this ADR + ADR-0019 D2) — ✅ implemented.
 2. **blockForRole** (D5) — ✅ implemented in `.dagger/internal/app/tools.go`.
-3. **review() function** (D4) — new function on `.dagger/`, read-only Env + RoleReviewer blocks.
-4. **Controller wiring** — reviewer Sub-Runs dispatch `review` instead of `code`.
-5. **dagmar-issues/memory write restrictions** — block create/update/write actions via
+3. **review() function** (D4) — ✅ implemented in `.dagger/internal/app/review.go`.
+4. **Structured output + retry** (ADR-0025) — ✅ implemented in `.dagger/internal/app/output.go`.
+5. **Controller wiring** — reviewer Sub-Runs dispatch `review` instead of `code`.
+6. **dagmar-issues/memory write restrictions** — block create/update/write actions via
    `WithBlockedFunction` on sub-functions (Phase 3).
 
 ## Consequences
