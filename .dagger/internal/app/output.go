@@ -1,7 +1,7 @@
 // Package app contains dagmar's application services.
 //
 // output.go implements the JSON-output extraction + retry mechanism for LLM agents.
-// 
+//
 // All agent roles use WithJSONValueOutput to declare structured outputs. After Loop(),
 // the output binding may or may not be set — the agent might not have called Save, or
 // the JSON might not validate against the expected schema. This file provides:

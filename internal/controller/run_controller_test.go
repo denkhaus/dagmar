@@ -275,9 +275,9 @@ func TestReconcile_GitCredentialsRefProjectsPATAndHelper(t *testing.T) {
 	}
 	cmd := pod.Spec.Containers[0].Command[2]
 	for want, why := range map[string]string{
-		"apk add --no-cache kubectl curl git":            "git installed for the credential helper",
-		"git config --global credential.helper":          "headless git credential helper configured",
-		`echo password="$DAGMAR_GIT_PAT"`:                "helper emits the projected PAT (quoted)",
+		"apk add --no-cache kubectl curl git":                            "git installed for the credential helper",
+		"git config --global credential.helper":                          "headless git credential helper configured",
+		`echo password="$DAGMAR_GIT_PAT"`:                                "helper emits the projected PAT (quoted)",
 		"dagger call --allow-llm all -m " + testModuleRef + " probe-net": "module call still present",
 	} {
 		if !strings.Contains(cmd, want) {

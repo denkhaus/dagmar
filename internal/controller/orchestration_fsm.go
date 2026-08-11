@@ -3,13 +3,9 @@ package controller
 import (
 	"context"
 	"fmt"
-	"strconv"
 
 	"github.com/denkhaus/dagmar/api/v1alpha1"
 	"github.com/looplab/fsm"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
@@ -179,21 +175,6 @@ func subRunConfigForState(state string, run *v1alpha1.Run, project *v1alpha1.Pro
 	return nil
 }
 
-
-// readPrompterFromAnnotations reads the prompter model + maxAPICalls from the run's
-// annotations (set by resolvePrompterWrapper in the orchestration entry point).
-func readPrompterFromAnnotations(run *v1alpha1.Run) (string, int) {
-	if run.Annotations == nil {
-		return "", 0
-	}
-	model := run.Annotations[annPrompterModel]
-	maxAPICalls := 0
-	if v, ok := run.Annotations[annPrompterMaxAPICalls]; ok {
-		maxAPICalls, _ = strconv.Atoi(v)
-	}
-	return model, maxAPICalls
-}
-
 // handleGateEvaluation handles the StateGating case: the gate runs inside the coder
 // pod (chained after code()), not as a separate Sub-Run. The controller reads the
 // coder pod's termination message and evaluates gate-green/red.
@@ -246,16 +227,21 @@ func (r *RunReconciler) handleGateEvaluation(ctx context.Context, run *v1alpha1.
 }
 
 // evaluateGate reads the coder pod's termination message and returns gate-green/red
-// plus measured coverage in basis points. Falls back to green on coder success if
-// the termination message is unavailable.
+// plus measured coverage in basis points. Fail-closed: if a pod exists but its gate
+// result is unreadable (not terminated, no message, parse error), the gate is RED.
+// If no pod exists at all (test/dev environment without real pods), the gate defaults
+// to green — the coder's Sub-Run success is trusted when there is no pod to inspect
+// (Review 30 E2a: fail-closed applies only when a pod IS present but unreadable).
 func (r *RunReconciler) evaluateGate(ctx context.Context, run *v1alpha1.Run, project *v1alpha1.Project, wf *v1alpha1.Workflow) (bool, int) {
-	gateGreen := true
+	gateGreen := true // default: no pod = trust Sub-Run success (test/dev env)
 	var measuredCoverageBps int
 
 	coderName := subRunName(run.Name, fmt.Sprintf("coder-r%d", run.Status.CurrentRound+1))
 	coderSub := &v1alpha1.Run{}
 	if err := r.Get(ctx, types.NamespacedName{Name: coderName, Namespace: run.Namespace}, coderSub); err == nil {
 		if coderSub.Status.AgentPodName != "" {
+			// Pod exists: read the real gate result. Fail-closed if unreadable.
+			gateGreen = false
 			if gateResult, err := r.readGateResult(ctx, coderSub.Status.AgentPodName, run.Namespace); err == nil {
 				gateGreen = gateResult.Passed
 				measuredCoverageBps = gateResult.CoverageBps
@@ -310,31 +296,3 @@ func (r *RunReconciler) resolvePrompter(ctx context.Context, wf *v1alpha1.Workfl
 	}
 	return prompter.Spec.Model, prompter.Spec.MaxAPICalls
 }
-
-
-// transitionPipelineFSM updates the orchestration Run's pipeline state via the FSM outcome.
-func transitionPipelineFSM(run *v1alpha1.Run, newState string) {
-	run.Status.PipelinePhase = newState
-	switch newState {
-	case StateDone:
-		run.Status.Phase = v1alpha1.RunPhaseSucceeded
-		meta.SetStatusCondition(&run.Status.Conditions, metav1.Condition{
-			Type: v1alpha1.RunConditionSucceeded, Status: metav1.ConditionTrue,
-			Reason: "PipelineDone", ObservedGeneration: run.Generation,
-		})
-	case StateEscalated:
-		run.Status.Phase = v1alpha1.RunPhaseFailed
-		meta.SetStatusCondition(&run.Status.Conditions, metav1.Condition{
-			Type: v1alpha1.RunConditionFailed, Status: metav1.ConditionTrue,
-			Reason: "PipelineEscalated", ObservedGeneration: run.Generation,
-		})
-	default:
-		run.Status.Phase = v1alpha1.RunPhaseRunning
-	}
-}
-
-// Ensure unused imports are referenced.
-var (
-	_ = apierrors.IsNotFound
-	_ = strconv.Itoa
-)

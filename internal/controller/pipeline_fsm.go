@@ -28,15 +28,15 @@ const (
 // FSM event names. These describe the transitions that drive the pipeline forward.
 // Fired by the generic reconcileOrchestration based on observed Sub-Run outcomes.
 const (
-	EventCoderSucceeded    = "coder_succeeded"
-	EventCoderFailed       = "coder_failed"
-	EventGateGreen         = "gate_green"
-	EventGateRed           = "gate_red"
-	EventReviewerApprove   = "reviewer_approve"
-	EventReviewerVeto      = "reviewer_veto"
+	EventCoderSucceeded     = "coder_succeeded"
+	EventCoderFailed        = "coder_failed"
+	EventGateGreen          = "gate_green"
+	EventGateRed            = "gate_red"
+	EventReviewerApprove    = "reviewer_approve"
+	EventReviewerVeto       = "reviewer_veto"
 	EventAdjudicatorResolve = "adjudicator_resolved"
-	EventAdjudicatorFail   = "adjudicator_failed"
-	EventMaxRetriesReached = "max_retries_reached"
+	EventAdjudicatorFail    = "adjudicator_failed"
+	EventMaxRetriesReached  = "max_retries_reached"
 )
 
 // newPipelineFSM constructs the orchestration FSM for a given Run. The FSM encodes
@@ -61,12 +61,12 @@ func newPipelineFSM() *fsm.FSM {
 		fsm.Events{
 			// Coder outcomes
 			{Name: EventCoderSucceeded, Src: []string{StateCoding}, Dst: StateGating},
-			{Name: EventCoderFailed, Src: []string{StateCoding}, Dst: StateCoding},      // revise loop
+			{Name: EventCoderFailed, Src: []string{StateCoding}, Dst: StateCoding}, // revise loop
 			{Name: EventMaxRetriesReached, Src: []string{StateCoding}, Dst: StateEscalated},
 
 			// Gate outcomes
 			{Name: EventGateGreen, Src: []string{StateGating}, Dst: StateReviewing},
-			{Name: EventGateRed, Src: []string{StateGating}, Dst: StateCoding},           // revise loop
+			{Name: EventGateRed, Src: []string{StateGating}, Dst: StateCoding}, // revise loop
 			{Name: EventMaxRetriesReached, Src: []string{StateGating}, Dst: StateEscalated},
 
 			// Reviewer outcomes

@@ -432,7 +432,6 @@ func setRunStatusPhase(t *testing.T, cl client.Client, key types.NamespacedName,
 	}
 }
 
-
 // setProjectCoveragePolicy patches a Project to add a CoveragePolicy (spec) and
 // optionally a CoverageFloor status value (for test setup). Spec and status are
 // patched separately because the status subresource only applies status changes.

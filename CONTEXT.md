@@ -61,8 +61,8 @@ function in the Project module. See ADR-0001; ADR-0018 (Tier-B redefined).
   layer of the QualityGate.
 - **Loop** — `dag.LLM(opts).WithEnv(env).WithPromptFile(prompt).Loop()`; the agent
   cognition loop (v0.21.8: `LLMOpts{Model, MaxAPICalls}`). A Run drives exactly one Loop
-  (ADR-0021). Multi-step tasks = controller orchestration of multiple Sub-Runs (ADR-0016),
-  each driving one Loop. Token budget = `MaxAPICalls` (engine-enforced hard stop);
+  (ADR-0021). Multi-step tasks = chained Go-method calls within the CognitionRun pipeline
+  (ADR-0027), each role driving one Loop. Revise loops keep the LLM context (ADR-0027 D2). Token budget = `MaxAPICalls` (engine-enforced hard stop);
   `llm.TokenUsage()` for cost accounting. The prompt is synthesized at runtime by the
   Prompter-LLM (ADR-0023); the function receives a ready `.md` file.
 - **TokenUsage** — Dagger's cost observability (`llm.TokenUsage()` → `*LLMTokenUsage`).
@@ -183,17 +183,21 @@ dogfooding).
 
 ## Key relationships
 
-- **Execution quartet (atomic Runs/Sub-Runs):** an atomic Run is the product of
+- **Execution quartet:** an atomic Run is the product of
   `{Agent, Sandbox, Workspace}` — Run itself is the fourth member. `Agent 1:N Runs` (a role is
   materialized as many Runs); `Task 1:N Runs`, each atomic `Run 1:1 Sandbox`, all under one
-  Engine. **Orchestration Runs** (ADR-0016 §2) supervise N atomic Sub-Runs per a Workflow
+  Engine. ~~**Orchestration Runs** (ADR-0016 §2) supervise N atomic Sub-Runs per a Workflow
   template and have no Agent/Sandbox/Workspace of their own — the quartet applies to atomic
-  Runs and Sub-Runs.
+  Runs and Sub-Runs.~~ → **Revised (ADR-0027):** the CognitionRun pipeline replaces
+  orchestration Runs + Sub-Runs with a single Dagger function call. The quartet applies
+  to the pipeline Run.
 - **Work hierarchy:** `Project 1:N Tasks`; `Task ≡ 1 seeds issue`; `Task 1:N Runs`.
 - **Workspace:** per-Task base ref; per-Run isolated clone with in/out lineage.
-- **Sub-Run:** an atomic Run created by an orchestration Run (ADR-0016 §2). Each Sub-Run
-  drives exactly one Loop (ADR-0021 D3). A Sub-Run IS an atomic Run — the term specifies
-  its parent relationship, not a different type.
+- **~~Sub-Run~~ CognitionRun pipeline:** ~~an atomic Run created by an orchestration Run
+  (ADR-0016 §2).~~ → **Revised (ADR-0027):** the CognitionRun pipeline is a single Dagger
+  custom-object function call that chains multiple LLM Loops (one per role). The controller
+  dispatches one pipeline call per Run — no separate Sub-Runs. Step results flow to the
+  controller via a Collector HTTP-push endpoint (ADR-0027 D3).
 - **Gating flow:** coder-Run → candidate → **gate (always pre-merge)** → **two green
   lights** (QualityGate ∧ ReviewAgent.approve) → `merge ⟺ both green ∧ authority==auto`;
   else `{revise | escalate}`. The gate is **invariant** — it always runs on the candidate

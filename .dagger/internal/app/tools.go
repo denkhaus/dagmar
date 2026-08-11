@@ -12,8 +12,6 @@
 package app
 
 import (
-	"fmt"
-
 	"dagger/dagmar/internal/dagger"
 )
 
@@ -59,14 +57,4 @@ func blockForRole(llm *dagger.LLM, role Role) *dagger.LLM {
 	}
 
 	return llm
-}
-
-// validateRole returns an error if the role is unrecognized.
-func validateRole(role Role) error {
-	switch role {
-	case RolePrompter, RoleCoder, RoleReviewer, RoleAdjudicator:
-		return nil
-	default:
-		return fmt.Errorf("unknown role %q (want prompter|coder|reviewer|adjudicator)", role)
-	}
 }

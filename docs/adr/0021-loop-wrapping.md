@@ -144,16 +144,24 @@ CONTEXT.md says "A Run drives exactly one Loop." This is preserved. Multi-step t
 by the **controller's orchestration layer** (ADR-0016 dual-mode Run):
 
 1. An **orchestration Run** references a Workflow (pipeline template, ADR-0016).
-2. The controller creates **atomic Sub-Runs**, each driving one Loop.
-3. Between Sub-Runs, the controller transitions pipeline state (RED → revise, GREEN → review).
+2. ~~The controller creates **atomic Sub-Runs**, each driving one Loop.~~
+   → **Revised (ADR-0027):** the controller dispatches a single CognitionRun pipeline call.
+   The pipeline chains Prompt→Code→Gate→Review→Adjudicate as Go-method calls within the Dagger
+   module. Each LLM role still drives exactly one Loop, but the chaining is Dagger-native
+   (custom object state serialization), not controller-orchestrated Sub-Runs.
+3. ~~Between Sub-Runs, the controller transitions pipeline state (RED → revise, GREEN → review).~~
+   → **Revised:** the pipeline handles revise loops internally (gate-red → re-code in the same
+   LLM context). The controller evaluates the final pipeline result (approve/escalate).
 
-Example: the quality-gate pipeline (ADR-0009 provides the pipeline instance; ADR-0016
-provides the orchestration mechanism):
-- Sub-Run 1: **coder** — `dagger call -m .dagger code --source <ws> --prompt <coder.md>` → Loop
-- Sub-Run 2: **reviewer** — `dagger call -m .dagger code --source <ws> --prompt <review.md>` → Loop (different Agent/Prompt, same module function)
+Example (revised, ADR-0027): the quality-gate pipeline is a single CognitionRun call:
+- `dagger call cognition-run --source <ws> --task-context <text> --model <m>`
+- Internally: Prompt → Code (Loop) → Gate (Container.WithExec) → Review (Loop) → Adjudicate (Loop)
+- Revise loops keep the coder's LLM context (the agent remembers prior failed attempts)
+- Returns structured JSON: {outcome, gate_result, review_verdict, coverage_bps, rounds}
 
-Each Sub-Run's Loop is self-contained: one LLM, one Env, one workspace, one prompt. The
-controller sequences them and evaluates outcomes (gate green/red, review approve/veto).
+Each role's Loop is still self-contained: one LLM, one Env, one workspace, one prompt.
+The two-green model (ADR-0006) is preserved — coder and reviewer are different Agents
+with separate Loops, just chained within one Dagger function call instead of separate pods.
 
 **Why not one Loop for everything:** a single Loop spanning code → review → merge would couple
 cognition (code) with judgment (review) and policy (merge) in one uncontrolled LLM context. The
@@ -267,8 +275,9 @@ design principle is that cost accounting is captured inside the function, not by
   (`dagger call -m <ref> <fn>`) extends naturally — both are just functions.
 - **Env is execution-plane, not control-plane:** the K8s controller cannot construct Dagger SDK
   types; it dispatches the function, and the function builds the Env. This is ADR-0010 §3.
-- **Multi-step = orchestration:** the controller sequences Sub-Runs (ADR-0016). Each Sub-Run
-  drives exactly one Loop. No multi-step Loops.
+- **Multi-step = pipeline chaining (ADR-0027):** the CognitionRun pipeline chains multiple
+  Loops (one per LLM role) as Go-method calls within the Dagger module. Each role drives
+  exactly one Loop. ~~The controller sequences Sub-Runs (ADR-0016).~~ No multi-step Loops.
 - **MaxAPICalls is the budget:** engine-enforced hard stop. TokenUsage provides accounting.
   Budget exhaustion = Run failure → pipeline revise or escalation.
 - **Prompt is pre-composed:** the controller merges canopy stores (ADR-0005) before dispatch.

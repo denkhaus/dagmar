@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"dagger/dagmar-project/internal/dagger"
-	
 )
 
 // GateResult is the JSON contract for dagmar-gate output.
@@ -190,15 +189,11 @@ func runCheck(ctx context.Context, source *dagger.Directory, githubToken *dagger
 }
 
 func parseDagmarExit(out string) int {
-	last := -1
 	for _, line := range strings.Split(out, "\n") {
 		var n int
 		if _, err := fmt.Sscanf(strings.TrimSpace(line), "DAGMAR_EXIT=%d", &n); err == nil {
-			last = n
+			return n // first match wins (Review 30 A7/E3a: echo appends after command)
 		}
 	}
-	if last < 0 {
-		return 1
-	}
-	return last
+	return 1
 }

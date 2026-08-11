@@ -87,8 +87,10 @@ updating the knowledge base.
 
 The reviewer has a dedicated `Review()` function on the `.dagger` platform module (Q5=a). Unlike
 `Code()`, it is read-only (no `Writable`, no `DirectoryOutput`) and returns a structured JSON
-verdict via `WithJSONValueOutput` (ADR-0025). The controller dispatches `review` for reviewer
-Sub-Runs and `code` for coder Sub-Runs.
+verdict via `WithJSONValueOutput` (ADR-0025). ~~The controller dispatches `review` for reviewer
+Sub-Runs and `code` for coder Sub-Runs.~~
+→ **Revised (ADR-0027):** the CognitionRun pipeline calls `Review()` as a Go-method
+directly — no controller dispatch, no Sub-Runs.
 
 The `Review()` function:
 - Builds a read-only Env (Privileged, not Writable).
@@ -97,7 +99,9 @@ The `Review()` function:
 - Extracts the verdict via `extractJSONOutput` with retry (ADR-0025 D2).
 - Returns a `ReviewVerdict{Decision, Rationale, Issues}` struct.
 
-Controller wiring (dispatch `review` instead of `code` for reviewer Sub-Runs) is pending.
+~~Controller wiring (dispatch `review` instead of `code` for reviewer Sub-Runs) is pending.~~
+→ **Revised (ADR-0027):** no controller wiring needed — the CognitionRun pipeline calls
+Review() directly as a Go method.
 
 ### D5 — Tool-surface enforcement via WithBlockedFunction
 
@@ -150,7 +154,8 @@ now exclusively a deterministic controller step.
 2. **blockForRole** (D5) — ✅ implemented in `.dagger/internal/app/tools.go`.
 3. **review() function** (D4) — ✅ implemented in `.dagger/internal/app/review.go`.
 4. **Structured output + retry** (ADR-0025) — ✅ implemented in `.dagger/internal/app/output.go`.
-5. **Controller wiring** — reviewer Sub-Runs dispatch `review` instead of `code`.
+5. ~~**Controller wiring** — reviewer Sub-Runs dispatch `review` instead of `code`.~~
+   → **Revised (ADR-0027):** no controller wiring — CognitionRun pipeline calls Review() directly.
 6. **dagmar-issues/memory write restrictions** — block create/update/write actions via
    `WithBlockedFunction` on sub-functions (Phase 3).
 

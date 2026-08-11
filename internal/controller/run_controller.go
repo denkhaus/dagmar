@@ -9,13 +9,13 @@ import (
 
 	"github.com/denkhaus/dagmar/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/utils/ptr"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -589,7 +589,7 @@ func shellJoin(args []string) string {
 
 // shellQuote single-quotes a string for safe shell interpolation. The task-context is
 // author-supplied and may contain spaces, special chars, or quotes; single-quoting makes it
-// a literal shell argument. Any embedded single-quote is escaped with the sequence '\''.
+// a literal shell argument. Any embedded single-quote is escaped with the sequence '\”.
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'"'"'`) + "'"
 }

@@ -8,7 +8,7 @@
 // (ADR-0012 HOUSE-2: deliberate duplication, not a DRY violation).
 //
 // Phase 0 (ADR-0012 §2) defines only Project + Run; the full CRD set
-// {Project, Agent, Prompt, QualityGate, Trigger, Run} is added as the control plane grows.
+// {Project, Agent, QualityGate, Trigger, Workflow, Run} is added as the control plane grows.
 //
 // +kubebuilder:object:generate=true
 // +groupName=dagmar.denkhaus.io

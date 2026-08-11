@@ -93,13 +93,18 @@ type RunStatus struct {
 
 These fields are zero-valued on atomic Runs.
 
-### 4. Orchestration is controller-driven (not function-driven)
+### 4. Orchestration is controller-driven (not function-driven) — PARTIALLY SUPERSEDED by ADR-0027
 
-The controller is the orchestrator. It reads the Workflow metadata (`requiresTwoGreen`,
+> **Revised (ADR-0027):** the controller is no longer the step-level orchestrator. It dispatches
+> a single CognitionRun pipeline call. Step orchestration (prompt→code→gate→review→adjudicate)
+> lives inside the Dagger module as chained Go-method calls. The controller retains policy-level
+> orchestration: retry/escalate/done decisions based on the pipeline's final result.
+
+~~The controller is the orchestrator. It reads the Workflow metadata (`requiresTwoGreen`,
 `maxReviseRounds`, `agents`, `qualityGateRef`), generates Sub-Runs in the pipeline sequence, and
-evaluates their status to decide transitions (RED → revise, GREEN → review, VETO → calibration).
+evaluates their status to decide transitions (RED → revise, GREEN → review, VETO → calibration).~~
 
-Each Sub-Run's Dagger function is **convention, not configuration** — the controller knows:
+~~Each Sub-Run's Dagger function is **convention, not configuration** — the controller knows:~~
 
 | Pipeline step | Dagger function | Source |
 |---------------|-----------------|--------|

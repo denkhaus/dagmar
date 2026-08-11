@@ -14,7 +14,6 @@ package workflows
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"dagger/dagmar-project/internal/dagger"
 )
@@ -164,9 +163,3 @@ func mlContainer(source *dagger.Directory) (*dagger.Container, error) {
 		WithMountedDirectory("/workspace", source).
 		WithWorkdir("/workspace"), nil
 }
-
-// joinSpace joins strings with spaces (convenience for error formatting).
-func joinSpace(parts ...string) string {
-	return strings.Join(parts, " ")
-}
-var _ = joinSpace // suppress unused warning until needed

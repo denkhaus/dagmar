@@ -1,10 +1,12 @@
 # ADR-0025: Structured agent output via WithJSONValueOutput
 
-- **Status:** decided
+- **Status:** decided (revised 2026-08-11: termination-log fully removed — see ADR-0027)
 - **Date:** 2026-08-11
 - **Evidence:** resolves the >2000-byte termination-log limitation; builds on ADR-0021
   (loop wrapping), ADR-0024 (per-role tools). Empirical reference: greetings-api
   `review.go` (mx-e05f90) uses `WithStringOutput` + `env.Output("review").AsString(ctx)`.
+- **Revised:** ADR-0027 (Pipeline-in-Module) removes termination-log ENTIRELY — including
+  for the deterministic gate. All outputs flow through Dagger function return values.
 
 ## Context
 
@@ -61,5 +63,7 @@ ensuring every agent output is structured JSON.
 - **Prompter** remains a string output (its prompt text is consumed by the next step, not by
   the controller for decisions — it doesn't need structured JSON).
 - **Coder** returns `*dagger.Directory` (unchanged).
-- **Termination-log** is used ONLY by the deterministic gate (GateResult JSON), not by LLM
-  agents. The gate runs as a shell command, not as a Dagger function with output bindings.
+- **Termination-log** is removed entirely (ADR-0027). Originally this ADR allowed the
+  deterministic gate to keep using `/dev/termination-log`; the Pipeline-in-Module refactoring
+  eliminates it completely — the gate runs via `Container.WithExec` inside the CognitionRun
+  pipeline and its result flows as a Go return value, not through pod-level tricks.

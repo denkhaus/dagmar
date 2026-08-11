@@ -76,8 +76,10 @@ dagger call prompt --source /workspace --phase pre-code ... --output /tmp/prompt
 ```
 
 There is no controller decision point between prompting and coding — the prompter's output flows
-directly to the coder. Gate and Reviewer remain separate Sub-Runs (the controller evaluates
-gate-green between them).
+directly to the coder. ~~Gate and Reviewer remain separate Sub-Runs (the controller evaluates
+gate-green between them).~~ → **Revised (ADR-0027):** Gate, Review, and Adjudicate are now
+chained Go-method calls within the CognitionRun pipeline — no separate Sub-Runs. The
+controller dispatches a single pipeline call.
 
 ### D4 — Adjudicator replaces the Calibration Agent
 
@@ -139,8 +141,10 @@ The Adjudicator always acts in the project's best interest. When it cannot, it e
     disagreement  → [6. Adjudicator LLM] → resolve or escalate
 ```
 
-Pipeline phases on the orchestration Run status:
-`"prompting" | "coding" | "gating" | "reviewing" | "adjudicating" | "escalated" | "done"`
+~~Pipeline phases on the orchestration Run status:
+`"prompting" | "coding" | "gating" | "reviewing" | "adjudicating" | "escalated" | "done"`~~
+→ **Revised (ADR-0027):** policy-level phases only: `"dispatching" | "running" | "done" | "escalated"`.
+Step-level phases are internal to the CognitionRun pipeline, not exposed as Run status.
 
 ### D6 — Separate models per role
 

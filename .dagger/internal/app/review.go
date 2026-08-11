@@ -31,9 +31,9 @@ import (
 //	  "issues": ["issue 1", "issue 2"]  // empty if approved
 //	}
 type ReviewVerdict struct {
-	Decision  string   `json:"decision"`           // "approve" or "veto"
-	Rationale string   `json:"rationale"`          // human-readable explanation
-	Issues    []string `json:"issues,omitempty"`    // specific issues (if veto)
+	Decision  string   `json:"decision"`         // "approve" or "veto"
+	Rationale string   `json:"rationale"`        // human-readable explanation
+	Issues    []string `json:"issues,omitempty"` // specific issues (if veto)
 }
 
 // IsApprove returns true if the verdict is an approval.

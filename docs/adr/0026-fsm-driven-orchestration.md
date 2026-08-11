@@ -1,11 +1,17 @@
 # ADR-0026: FSM-driven orchestration pipeline
 
-- **Status:** decided
+- **Status:** superseded by ADR-0027 (Pipeline-in-Module) — the step-level FSM topology
+  (D2/D3/D5) is replaced by a policy-level FSM. The FSM itself (looplab/fsm, D1/D4) is retained.
 - **Date:** 2026-08-11
+- **Superseded by:** ADR-0027 (Pipeline-in-Module refactoring)
 - **Evidence:** replaces the four hand-written advance* functions; resolves ADR-0016 §1
   "a declarative step engine would be speculative generality" (no longer speculative — the
   pipeline has four roles and revise loops). Builds on ADR-0023 D5 (pipeline), ADR-0024
   (per-role tools), ADR-0025 (structured outputs).
+- **Why superseded:** the step-level states (coding/gating/reviewing/adjudicating) assumed the
+  controller orchestrates each pipeline step as a separate Sub-Run. ADR-0027 moves the step
+  orchestration into the Dagger module (CognitionRun custom object). The FSM remains, but at
+  policy level (dispatching/running/done/escalated) — see ADR-0027 D4.
 
 ## Context
 
@@ -57,7 +63,14 @@ const (
 
 No inline strings anywhere in the codebase. All transitions reference these constants.
 
-### D3 — The FSM topology replaces hardcoded advance* logic
+### D3 — The FSM topology replaces hardcoded advance* logic (SUPERSEDED by ADR-0027 D4)
+
+> **Superseded:** This step-level topology assumed the controller creates separate Sub-Runs
+> per pipeline step. ADR-0027 moves step orchestration into the CognitionRun Dagger custom
+> object. The FSM retains looplab/fsm (D1) and requeue-not-recursion (D4), but transitions
+> to a policy-level topology: `dispatching → running → done` / `running → escalated`.
+
+Original topology (for historical reference):
 
 ```
 coding → gating → reviewing → done
@@ -67,9 +80,8 @@ coding → gating → reviewing → done
                 escalated (unresolvable)
 ```
 
-The FSM defines all legal transitions. The generic reconcile function observes Sub-Run
-outcomes and fires the appropriate event. The FSM computes the transition; callbacks are
-not needed (the reconcile function handles the post-transition work directly).
+The FSM defined all legal transitions. The generic reconcile function observed Sub-Run
+outcomes and fired the appropriate event.
 
 ### D4 — Requeue, not recursion
 
@@ -79,22 +91,25 @@ transition is a separate reconcile cycle, triggered by the controller-runtime wo
 Recursion caused infinite loops in testing (stale local state) and would mask errors in
 production (no backoff between steps).
 
-### D5 — subRunConfigForState is the dispatch table
+### D5 — subRunConfigForState is the dispatch table (SUPERSEDED by ADR-0027)
 
-A single function maps each state to its Sub-Run configuration (agent ref, module function,
-prompter phase, coverage floor). States that don't create Sub-Runs (StateGating evaluates
-the coder's gate result; StateAdjudicating without an adjudicator escalates) return nil.
+> **Superseded:** With step orchestration moved into the CognitionRun pipeline (ADR-0027),
+> the controller no longer creates per-step Sub-Runs. subRunConfigForState is removed.
 
-## Consequences
+Original: a single function mapped each state to its Sub-Run configuration (agent ref,
+module function, prompter phase, coverage floor). States that didn't create Sub-Runs
+(StateGating evaluates the coder's gate result; StateAdjudicating without an adjudicator
+escalates) returned nil.
 
-- **The four advance* functions are replaced** by one generic `reconcileOrchestrationFSM` +
-  a declarative FSM definition. Adding a pipeline step = adding an FSM event + transition +
-  a case in `subRunConfigForState`.
+## Consequences (partially superseded by ADR-0027)
+
+- **~~The four advance* functions are replaced~~** by one generic `reconcileOrchestrationFSM` +
+  a declarative FSM definition. → **Superseded:** ADR-0027 moves step orchestration into
+  the CognitionRun pipeline. The advance* functions and `subRunConfigForState` are removed.
+  The FSM remains at policy level.
 - **ADR-0016 §1 is updated:** "speculative generality" is no longer speculative. The FSM
-  IS the step engine, but at the Go-code level, not in the CRD YAML.
-- **looplab/fsm v1.0.3** is a new direct dependency (3.4k stars, Apache 2.0, actively used).
-- **Mermaid visualization** is available via `fsm.VisualizeForMermaidWithGraphType` — the
-  pipeline can be rendered as a diagram for documentation/debugging.
-- **Future: event-driven extensions** — the FSM supports callbacks (before_/after_/enter_/leave_)
-  and guards. External events (human approval, timer expiry) can fire FSM events without
-  changing the reconcile structure.
+  IS the step engine, but at the Go-code level, not in the CRD YAML. → **Still valid**,
+  but the FSM is now policy-level (dispatching/running/done/escalated), not step-level.
+- **looplab/fsm v1.0.3** is retained as a direct dependency. → **Still valid.**
+- **Mermaid visualization** is available via `fsm.VisualizeForMermaidWithGraphType`. → **Still valid.**
+- **Future: event-driven extensions** — the FSM supports callbacks and guards. → **Still valid.**

@@ -3,7 +3,7 @@
 # Not managed here: mulch (@os-eco/mulch-cli, a bun/npm package).
 [tools]
 # Keep aligned with the HIGHEST go.mod `go` directive — .dagger/go.mod declares 1.26.5 (the root
-# module declares 1.26.1); a 1.26.5 toolchain satisfies both with no GOTOOLCHAIN fetch.
+# all four modules declare 1.26.5); the toolchain matches exactly.
 go = "1.26.5"
 just = "1.57.0"        # was drifting (local 1.51.0 vs CI 1.57.0)
 # ubi backend (direct GitHub releases) for these: the default aqua backend's
