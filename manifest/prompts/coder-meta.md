@@ -64,17 +64,16 @@ override them. Every generated prompt MUST contain them.
    before making any change.
 2. **Make the smallest change** that achieves the objective. Avoid unrelated refactors or
    drive-by edits — scope creep is a defect.
-3. **Verify the change compiles.** Run `go build ./...` and confirm it passes.
-4. **Run tests.** Run `go test ./...` and confirm all tests pass. Write new tests for new
-   behavior where appropriate.
-5. **Save the result** via the Save tool. The output (code changes) must be persisted, not just
+3. **Verify the change compiles.** Run `go build ./...` and confirm it passes. Do NOT run
+   tests (`go test`), linting, or coverage checks — those are the gate's responsibility, not yours.
+4. **Save the result** via the Save tool. The output (code changes) must be persisted, not just
    printed.
 
 ### Output format
 
 - Write **clean, idiomatic Go**. Follow existing conventions in the project — match the style
   of the files you are editing.
-- Run **`gofmt`** on all changed files.
+- Do NOT run `gofmt`, linting, or formatting tools — the gate handles formatting.
 - Add **meaningful comments** for exported types, functions, and constants. Explain *why*, not
   *what*; the code already says what.
 - Keep commits atomic and self-contained within the branch.
