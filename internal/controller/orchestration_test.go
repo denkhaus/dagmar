@@ -121,14 +121,18 @@ func TestReconcile_OrchestrationAdvancesToReviewing(t *testing.T) {
 	}
 	r, cl := newTestOrchestrationReconciler(t, run)
 
+	key := types.NamespacedName{Name: "orch-2", Namespace: "default"}
+
 	// First reconcile: creates coder Sub-Run.
-	mustReconcile(t, ctx, r, ctrl.Request{NamespacedName: types.NamespacedName{Name: "orch-2", Namespace: "default"}})
+	mustReconcile(t, ctx, r, ctrl.Request{NamespacedName: key})
 
 	// Mark coder Sub-Run as Succeeded.
 	setRunStatusPhase(t, cl, types.NamespacedName{Name: subRunName("orch-2", "coder-r1"), Namespace: "default"}, v1alpha1.RunPhaseSucceeded)
 
-	// Second reconcile: should advance through gating to reviewing and create reviewer Sub-Run.
-	mustReconcile(t, ctx, r, ctrl.Request{NamespacedName: types.NamespacedName{Name: "orch-2", Namespace: "default"}})
+	// Reconcile until reviewing (coding→gating→reviewing, each step is a requeue).
+	reconcileUntil(t, r, cl, key, StateReviewing, 5)
+	// One more reconcile to create the reviewer Sub-Run (the phase is set before the Sub-Run).
+	mustReconcile(t, ctx, r, ctrl.Request{NamespacedName: key})
 
 	// Reviewer Sub-Run should exist.
 	reviewName := subRunName("orch-2", "review-r1")
@@ -146,8 +150,8 @@ func TestReconcile_OrchestrationAdvancesToReviewing(t *testing.T) {
 
 	// Orchestration Run should be in PipelinePhase=reviewing.
 	updated := fetchRun(t, cl, types.NamespacedName{Name: "orch-2", Namespace: "default"})
-	if updated.Status.PipelinePhase != PipelineReviewing {
-		t.Errorf("PipelinePhase = %q, want %q", updated.Status.PipelinePhase, PipelineReviewing)
+	if updated.Status.PipelinePhase != StateReviewing {
+		t.Errorf("PipelinePhase = %q, want %q", updated.Status.PipelinePhase, StateReviewing)
 	}
 }
 
@@ -161,19 +165,22 @@ func TestReconcile_OrchestrationReachesDone(t *testing.T) {
 	}
 	r, cl := newTestOrchestrationReconciler(t, run)
 
+	key := types.NamespacedName{Name: "orch-3", Namespace: "default"}
+
 	// coder succeeds.
-	mustReconcile(t, ctx, r, ctrl.Request{NamespacedName: types.NamespacedName{Name: "orch-3", Namespace: "default"}})
+	mustReconcile(t, ctx, r, ctrl.Request{NamespacedName: key})
 	setRunStatusPhase(t, cl, types.NamespacedName{Name: subRunName("orch-3", "coder-r1"), Namespace: "default"}, v1alpha1.RunPhaseSucceeded)
-	mustReconcile(t, ctx, r, ctrl.Request{NamespacedName: types.NamespacedName{Name: "orch-3", Namespace: "default"}})
+	reconcileUntil(t, r, cl, key, StateReviewing, 5)
+	mustReconcile(t, ctx, r, ctrl.Request{NamespacedName: key})
 
 	// reviewer succeeds.
 	setRunStatusPhase(t, cl, types.NamespacedName{Name: subRunName("orch-3", "review-r1"), Namespace: "default"}, v1alpha1.RunPhaseSucceeded)
-	mustReconcile(t, ctx, r, ctrl.Request{NamespacedName: types.NamespacedName{Name: "orch-3", Namespace: "default"}})
+	reconcileUntil(t, r, cl, key, StateDone, 5)
 
 	// Orchestration Run should be done (Succeeded).
-	updated := fetchRun(t, cl, types.NamespacedName{Name: "orch-3", Namespace: "default"})
-	if updated.Status.PipelinePhase != PipelineDone {
-		t.Errorf("PipelinePhase = %q, want %q", updated.Status.PipelinePhase, PipelineDone)
+	updated := fetchRun(t, cl, key)
+	if updated.Status.PipelinePhase != StateDone {
+		t.Errorf("PipelinePhase = %q, want %q", updated.Status.PipelinePhase, StateDone)
 	}
 	if updated.Status.Phase != v1alpha1.RunPhaseSucceeded {
 		t.Errorf("Phase = %q, want %q", updated.Status.Phase, v1alpha1.RunPhaseSucceeded)
@@ -239,15 +246,16 @@ func TestReconcile_OrchestrationReviewerVetoEscalatesWithoutAdjudicator(t *testi
 	// coder succeeds.
 	mustReconcile(t, ctx, r, ctrl.Request{NamespacedName: key})
 	setRunStatusPhase(t, cl, types.NamespacedName{Name: subRunName("orch-veto-1", "coder-r1"), Namespace: "default"}, v1alpha1.RunPhaseSucceeded)
+	reconcileUntil(t, r, cl, key, StateReviewing, 5)
 	mustReconcile(t, ctx, r, ctrl.Request{NamespacedName: key})
 
 	// reviewer fails (veto).
 	setRunStatusPhase(t, cl, types.NamespacedName{Name: subRunName("orch-veto-1", "review-r1"), Namespace: "default"}, v1alpha1.RunPhaseFailed)
-	mustReconcile(t, ctx, r, ctrl.Request{NamespacedName: key})
+	reconcileUntil(t, r, cl, key, StateEscalated, 5)
 
 	// Should escalate (no adjudicator configured in the default test workflow).
 	updated := fetchRun(t, cl, key)
-	if updated.Status.PipelinePhase != PipelineEscalated {
+	if updated.Status.PipelinePhase != StateEscalated {
 		t.Errorf("PipelinePhase = %q, want %q (escalate on veto without adjudicator)", updated.Status.PipelinePhase, PipelineEscalated)
 	}
 	if updated.Status.Phase != v1alpha1.RunPhaseFailed {
@@ -266,15 +274,17 @@ func TestReconcile_OrchestrationReviewerVetoAdjudicates(t *testing.T) {
 	// coder succeeds.
 	mustReconcile(t, ctx, r, ctrl.Request{NamespacedName: key})
 	setRunStatusPhase(t, cl, types.NamespacedName{Name: subRunName("orch-adj-1", "coder-r1"), Namespace: "default"}, v1alpha1.RunPhaseSucceeded)
+	reconcileUntil(t, r, cl, key, StateReviewing, 5)
 	mustReconcile(t, ctx, r, ctrl.Request{NamespacedName: key})
 
 	// reviewer fails (veto).
 	setRunStatusPhase(t, cl, types.NamespacedName{Name: subRunName("orch-adj-1", "review-r1"), Namespace: "default"}, v1alpha1.RunPhaseFailed)
+	reconcileUntil(t, r, cl, key, StateAdjudicating, 5)
 	mustReconcile(t, ctx, r, ctrl.Request{NamespacedName: key})
 
 	// Should enter adjudicating (adjudicator configured).
 	updated := fetchRun(t, cl, key)
-	if updated.Status.PipelinePhase != PipelineAdjudicating {
+	if updated.Status.PipelinePhase != StateAdjudicating {
 		t.Fatalf("PipelinePhase = %q, want %q", updated.Status.PipelinePhase, PipelineAdjudicating)
 	}
 
@@ -290,11 +300,11 @@ func TestReconcile_OrchestrationReviewerVetoAdjudicates(t *testing.T) {
 
 	// Adjudicator succeeds → conflict resolved → done.
 	setRunStatusPhase(t, cl, types.NamespacedName{Name: adjName, Namespace: "default"}, v1alpha1.RunPhaseSucceeded)
-	mustReconcile(t, ctx, r, ctrl.Request{NamespacedName: key})
+	reconcileUntil(t, r, cl, key, StateDone, 5)
 
 	updated = fetchRun(t, cl, key)
-	if updated.Status.PipelinePhase != PipelineDone {
-		t.Errorf("PipelinePhase = %q, want %q (adjudicator resolved)", updated.Status.PipelinePhase, PipelineDone)
+	if updated.Status.PipelinePhase != StateDone {
+		t.Errorf("PipelinePhase = %q, want %q (adjudicator resolved)", updated.Status.PipelinePhase, StateDone)
 	}
 	if updated.Status.Phase != v1alpha1.RunPhaseSucceeded {
 		t.Errorf("Phase = %q, want %q", updated.Status.Phase, v1alpha1.RunPhaseSucceeded)
@@ -311,19 +321,21 @@ func TestReconcile_OrchestrationAdjudicatorFailEscalates(t *testing.T) {
 	// coder succeeds.
 	mustReconcile(t, ctx, r, ctrl.Request{NamespacedName: key})
 	setRunStatusPhase(t, cl, types.NamespacedName{Name: subRunName("orch-adj-2", "coder-r1"), Namespace: "default"}, v1alpha1.RunPhaseSucceeded)
+	reconcileUntil(t, r, cl, key, StateReviewing, 5)
 	mustReconcile(t, ctx, r, ctrl.Request{NamespacedName: key})
 
 	// reviewer fails (veto).
 	setRunStatusPhase(t, cl, types.NamespacedName{Name: subRunName("orch-adj-2", "review-r1"), Namespace: "default"}, v1alpha1.RunPhaseFailed)
+	reconcileUntil(t, r, cl, key, StateAdjudicating, 5)
 	mustReconcile(t, ctx, r, ctrl.Request{NamespacedName: key})
 
 	// Adjudicator fails → escalate.
 	adjName := subRunName("orch-adj-2", "adjudicate-r1")
 	setRunStatusPhase(t, cl, types.NamespacedName{Name: adjName, Namespace: "default"}, v1alpha1.RunPhaseFailed)
-	mustReconcile(t, ctx, r, ctrl.Request{NamespacedName: key})
+	reconcileUntil(t, r, cl, key, StateEscalated, 5)
 
 	updated := fetchRun(t, cl, key)
-	if updated.Status.PipelinePhase != PipelineEscalated {
+	if updated.Status.PipelinePhase != StateEscalated {
 		t.Errorf("PipelinePhase = %q, want %q (adjudicator unresolvable)", updated.Status.PipelinePhase, PipelineEscalated)
 	}
 }
@@ -382,6 +394,28 @@ func setupAdjudicatorTest(t *testing.T, runName string, _ bool) (*RunReconciler,
 		}
 	}
 	return r, cl
+}
+
+// reconcileUntil repeatedly reconciles until the run's PipelinePhase reaches targetPhase,
+// or gives up after maxSteps (prevents infinite loops in tests). Simulates the controller-runtime
+// requeue behavior: each FSM transition returns Requeue:true, so the next Reconcile processes
+// the new state.
+func reconcileUntil(t *testing.T, r *RunReconciler, cl client.Client, key types.NamespacedName, targetPhase string, maxSteps int) {
+	t.Helper()
+	for i := 0; i < maxSteps; i++ {
+		mustReconcile(t, ctx, r, ctrl.Request{NamespacedName: key})
+		run := fetchRun(t, cl, key)
+		if run.Status.PipelinePhase == targetPhase {
+			return
+		}
+		if run.Status.PipelinePhase == StateEscalated || run.Status.PipelinePhase == StateDone {
+			if targetPhase != StateEscalated && targetPhase != StateDone {
+				t.Fatalf("pipeline reached %q before %q after %d steps", run.Status.PipelinePhase, targetPhase, i+1)
+			}
+			return
+		}
+	}
+	t.Fatalf("pipeline did not reach %q after %d steps", targetPhase, maxSteps)
 }
 
 // setRunStatusPhase patches a Run's status phase (for test simulation).
@@ -504,6 +538,8 @@ func TestReconcile_CoverageFloorRatcheting(t *testing.T) {
 	// coder succeeds → gating → ratcheting.
 	mustReconcile(t, ctx, r, ctrl.Request{NamespacedName: key})
 	setRunStatusPhase(t, cl, types.NamespacedName{Name: subRunName("cov-3", "coder-r1"), Namespace: "default"}, v1alpha1.RunPhaseSucceeded)
+	// Need multiple reconciles: coding→gating (requeue) then gating→reviewing (requeue, does ratcheting).
+	reconcileUntil(t, r, cl, key, StateReviewing, 5)
 	mustReconcile(t, ctx, r, ctrl.Request{NamespacedName: key})
 
 	// The project's CoverageFloor should now be MinimumFloor.

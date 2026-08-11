@@ -94,27 +94,35 @@ func (r *RunReconciler) reconcileOrchestration(ctx context.Context, run *v1alpha
 		}
 	}
 
-	phase := run.Status.PipelinePhase
-	if phase == "" {
-		phase = PipelineCoding
+	// Inject prompter config into the run's annotations (ADR-0023 D3).
+	if err := r.resolvePrompterWrapper(ctx, run, wf); err != nil {
+		return ctrl.Result{}, err
 	}
 
-	switch phase {
-	case PipelineCoding:
-		return r.advanceCoding(ctx, run, project, wf)
-	case PipelineGating:
-		return r.advanceGating(ctx, run, project, wf)
-	case PipelineReviewing:
-		return r.advanceReviewing(ctx, run, project, wf)
-	case PipelineAdjudicating:
-		return r.advanceAdjudicating(ctx, run, project, wf)
-	case PipelineDone, PipelineEscalated:
-		// Terminal — nothing to do.
-		return ctrl.Result{}, nil
-	default:
-		return ctrl.Result{}, r.failRun(ctx, run, "UnknownPipelinePhase",
-			fmt.Sprintf("unknown PipelinePhase %q", phase))
+	// Delegate to the FSM-driven generic orchestration (ADR-0026).
+	return r.reconcileOrchestrationFSM(ctx, run, project, wf)
+}
+
+// resolvePrompterWrapper injects prompter config into the run's annotations so
+// the Sub-Run creation path (getOrCreateSubRun) picks them up via the existing
+// annotation mechanism (annPrompterModel/annPrompterMaxAPICalls/annPrompterPhase).
+func (r *RunReconciler) resolvePrompterWrapper(ctx context.Context, run *v1alpha1.Run, wf *v1alpha1.Workflow) error {
+	pModel, pMaxAPICalls := r.resolvePrompter(ctx, wf, run.Namespace)
+	if pModel == "" {
+		return nil
 	}
+	// Patch annotations on the run.
+	fresh := &v1alpha1.Run{}
+	if err := r.Get(ctx, client.ObjectKeyFromObject(run), fresh); err != nil {
+		return err
+	}
+	base := fresh.DeepCopy()
+	if fresh.Annotations == nil {
+		fresh.Annotations = map[string]string{}
+	}
+	fresh.Annotations[annPrompterModel] = pModel
+	fresh.Annotations[annPrompterMaxAPICalls] = strconv.Itoa(pMaxAPICalls)
+	return r.Patch(ctx, fresh, client.MergeFrom(base))
 }
 
 // advanceCoding creates or watches the coder Sub-Run with a chained prompter
