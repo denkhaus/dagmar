@@ -1,0 +1,30 @@
+apiVersion: dagmar.denkhaus.io/v1alpha1
+kind: Agent
+metadata:
+  name: coder-agent
+  namespace: default
+spec:
+  # LiteLLM exposes glm-5.2 as an OpenAI-compatible model. Dagger routes via
+  # OPENAI_BASE_URL + OPENAI_API_KEY (set in the dagger-llm-config Secret).
+  model: "openai/glm-5.2"
+  maxAPICalls: 100
+---
+apiVersion: dagmar.denkhaus.io/v1alpha1
+kind: Agent
+metadata:
+  name: prompter-agent
+  namespace: default
+spec:
+  # The prompter uses the same model — a smaller/faster model would be ideal
+  # (ADR-0023 D6), but for local testing we reuse glm-5.2.
+  model: "openai/glm-5.2"
+  maxAPICalls: 25
+---
+apiVersion: dagmar.denkhaus.io/v1alpha1
+kind: Agent
+metadata:
+  name: reviewer-agent
+  namespace: default
+spec:
+  model: "openai/glm-5.2"
+  maxAPICalls: 50

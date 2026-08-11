@@ -65,6 +65,14 @@ type RunSpec struct {
 	// Runs created directly and on orchestration Runs.
 	// +optional
 	ParentRun string `json:"parentRun,omitempty"`
+
+	// TaskContext is the concrete task description passed to the prompter and coder
+	// (dagmar-d8dc). For orchestration Runs it is the issue text / objective the pipeline
+	// works on. The controller injects it as --task-context into the prompter call and
+	// flows it to coder/reviewer Sub-Runs via annotation. Without it the prompter has no
+	// concrete objective and explores the entire codebase aimlessly.
+	// +optional
+	TaskContext string `json:"taskContext,omitempty"`
 }
 
 // RunStatus holds the observed state of a Run. Phase 0 = status conditions + phase only

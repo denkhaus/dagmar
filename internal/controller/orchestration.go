@@ -375,6 +375,7 @@ func (r *RunReconciler) getOrCreateSubRun(ctx context.Context, parent *v1alpha1.
 			AgentRef:       agentRef,
 			ModuleFunction: fn,
 			ParentRun:      parent.Name,
+			TaskContext:    parent.Spec.TaskContext,
 		},
 	}
 	if err := ctrl.SetControllerReference(parent, sub, r.Scheme); err != nil {

@@ -1,0 +1,12 @@
+apiVersion: dagmar.denkhaus.io/v1alpha1
+kind: Workflow
+metadata:
+  name: dagmar-own-workflow
+  namespace: default
+spec:
+  prompterAgentRef: prompter-agent
+  coderAgentRef: coder-agent
+  reviewerAgentRef: reviewer-agent
+  # adjudicatorAgentRef: adjudicator-agent  # optional — omitted: disagreements escalate to human
+  qualityGateRef: dagmar-own-gate
+  requiresTwoGreen: true

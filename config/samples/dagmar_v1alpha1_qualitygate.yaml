@@ -1,0 +1,7 @@
+apiVersion: dagmar.denkhaus.io/v1alpha1
+kind: QualityGate
+metadata:
+  name: dagmar-own-gate
+  namespace: default
+spec:
+  maxReviseRounds: 2

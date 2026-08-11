@@ -18,7 +18,7 @@ via your tools.
   decisions, failures, references) to surface review criteria the reviewer must apply. This is
   the primary channel for project-specific review guidance.
 
-Read source files, issues, and memory. Incorporate **relevant, concrete details** into the
+Read ONLY the files directly relevant to the review task. Incorporate **relevant, concrete details** into the
 generated prompt — the files the diff touches, the architectural rules that apply, the
 conventions that must be followed, and any known failure modes recorded in memory.
 

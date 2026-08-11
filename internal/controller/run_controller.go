@@ -380,8 +380,8 @@ func agentPodFor(run *v1alpha1.Run, project *v1alpha1.Project, enginePod, podNam
 		// to the coder/reviewer.
 		if prompterPhase != "" {
 			prompterCmd := fmt.Sprintf(
-				`dagger call --allow-llm all -m %s prompt --source /workspace --phase %s --task-context '' --model %s`,
-				project.Spec.ModuleRef, prompterPhase, prompterModel,
+				`dagger call --allow-llm all -m %s prompt --source /workspace --phase %s --task-context %s --model %s`,
+				project.Spec.ModuleRef, prompterPhase, shellQuote(run.Spec.TaskContext), prompterModel,
 			)
 			if prompterMaxAPICalls > 0 {
 				prompterCmd += fmt.Sprintf(` --max-apicalls %d`, prompterMaxAPICalls)
@@ -407,16 +407,22 @@ func agentPodFor(run *v1alpha1.Run, project *v1alpha1.Project, enginePod, podNam
 	//
 	// The gate module (.dagmar) is loaded from the RESULT directory (it's inside the repo clone).
 	// coverage-floor-bps is passed from the Sub-Run annotation.
+	//
+	// Gate chain is cognition-only: code() returns a Directory that `+"`export`"+` can serialize.
+	// Non-cognition Runs (probe-net, sandbox, …) return other types; appending `+"`export`"+` causes
+	// "unknown command" parse errors. Only cognition Runs produce a workspace worth gating.
 	gateCall := ""
-	if coverageFloorBps > 0 {
-		gateCall = fmt.Sprintf(
-			` export --path /workspace-result && `+
-				`dagger call --allow-llm all -m /workspace-result/.dagmar dagmar-gate --source /workspace-result --coverage-floor-bps %d > /dev/termination-log`,
-			coverageFloorBps,
-		)
-	} else {
-		gateCall = ` export --path /workspace-result && ` +
-			`dagger call --allow-llm all -m /workspace-result/.dagmar dagmar-gate --source /workspace-result > /dev/termination-log`
+	if agentModel != "" {
+		if coverageFloorBps > 0 {
+			gateCall = fmt.Sprintf(
+				` export --path /workspace-result && `+
+					`dagger call --allow-llm all -m /workspace-result/.dagmar dagmar-gate --source /workspace-result --coverage-floor-bps %d > /dev/termination-log`,
+				coverageFloorBps,
+			)
+		} else {
+			gateCall = ` export --path /workspace-result && ` +
+				`dagger call --allow-llm all -m /workspace-result/.dagmar dagmar-gate --source /workspace-result > /dev/termination-log`
+		}
 	}
 	cmd := fmt.Sprintf(
 		`apk add --no-cache %s && `+
@@ -579,6 +585,13 @@ func agentPodName(runName string) string { return runName + "-agent" }
 // ModuleArgs) — all author-controlled in Phase 0; revisit for Phase 2 agent-generated Runs.
 func shellJoin(args []string) string {
 	return strings.Join(args, " ")
+}
+
+// shellQuote single-quotes a string for safe shell interpolation. The task-context is
+// author-supplied and may contain spaces, special chars, or quotes; single-quoting makes it
+// a literal shell argument. Any embedded single-quote is escaped with the sequence '\''.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'"'"'`) + "'"
 }
 
 // SetupWithManager registers the reconciler for Run CRs and watches owned Pods. D3 (ADR-0013 §2)
