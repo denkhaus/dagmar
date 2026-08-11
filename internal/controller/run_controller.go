@@ -31,6 +31,11 @@ const (
 	defaultAgentPodImage = "alpine:3.20"
 	// daggerVersion is the CLI version installed into the agent pod.
 	daggerVersion = "0.21.8"
+	// platformModuleRef is the Dagger module ref for the dagmar platform itself —
+	// the module that defines cognition-run, code, prompt, etc. The agent pod's
+	// `dagger call -m <ref>` for orchestration Runs uses this, NOT the project's
+	// moduleRef (which points to the project's hook module for WithMainModule).
+	platformModuleRef = "github.com/denkhaus/dagmar"
 	// agentSA is the per-namespace ServiceAccount the agent pods run as (shared across Runs in a
 	// namespace). It is granted pods/exec on the engine via agentRole/agentRoleBinding.
 	agentSA = "dagmar-agent"
@@ -448,12 +453,19 @@ func agentPodFor(run *v1alpha1.Run, project *v1alpha1.Project, enginePod, podNam
 	} else {
 		postCall = ""
 	}
+	// The -m flag selects which module to call. For cognition-run (orchestration),
+	// the function lives on the platform module (dagmar itself), not the project
+	// module. For atomic Runs, -m is the project's moduleRef as before.
+	moduleRef := project.Spec.ModuleRef
+	if run.Spec.ModuleFunction == "cognition-run" {
+		moduleRef = platformModuleRef
+	}
 	cmd := fmt.Sprintf(
 		`apk add --no-cache %s && `+
 			`curl -fsSL https://github.com/dagger/dagger/releases/download/v%s/dagger_v%s_linux_amd64.tar.gz | tar xz -C /usr/local/bin dagger && `+
 			preCall+
 			`dagger call --allow-llm all -m %s %s %s`+postCall,
-		apkPkgs, daggerVersion, daggerVersion, project.Spec.ModuleRef, run.Spec.ModuleFunction, shellJoin(fnArgs),
+		apkPkgs, daggerVersion, daggerVersion, moduleRef, run.Spec.ModuleFunction, shellJoin(fnArgs),
 	)
 	env := []corev1.EnvVar{
 		{Name: "_EXPERIMENTAL_DAGGER_RUNNER_HOST", Value: runnerHost},
