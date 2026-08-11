@@ -9,10 +9,12 @@ spec:
   # as the control plane grows.
   repo: https://github.com/denkhaus/dagmar
   agentPodImage: alpine:3.20
-  # moduleRef: the dagmar module the agent pod invokes via `dagger call -m <ref>` (ADR-0012
-  # §2 GAP-1, load-bearing Phase-0 read). The engine fetches the module server-side from this git
-  # ref; the pushed repo at main carries probe-net. Dogfood: dagmar calls its own published self.
-  moduleRef: github.com/denkhaus/dagmar
+  # moduleRef: the PROJECT module whose hooks (dagmar-bootstrap, dagmar-gate, dagmar-issues,
+  # dagmar-memory) the agent pod loads via WithMainModule (ADR-0012 §2, ADR-0017/0019).
+  # For dogfooding this is the .dagmar sub-module — NOT the platform module (.dagger).
+  # The pipeline's cognition-run function lives in the platform module (called via -m),
+  # but the project hooks it loads for LLM tools come from this ref.
+  moduleRef: github.com/denkhaus/dagmar/.dagmar
   # gitCredentialsRef: the repo is PRIVATE (2026-08-04). The engine fetches the module via the
   # #8805 git-credential path (ADR-0013 §4 D10): the controller projects this Secret's PAT into the
   # agent pod and configures a headless git credential helper. Create the Secret from gopass (the

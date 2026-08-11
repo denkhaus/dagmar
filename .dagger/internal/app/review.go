@@ -75,10 +75,8 @@ func Review(
 		WithJSONValueOutput("verdict", `JSON: {"decision":"approve|veto","rationale":"explanation","issues":["..."]}`)
 
 	// 2. Optionally load the project module for dagmar-issues + dagmar-memory hooks.
-	var projectMod *dagger.Module
 	if moduleRef != "" {
-		var err error
-		projectMod, err = client.ModuleSource(moduleRef).AsModule().Sync(ctx)
+		projectMod, err := client.ModuleSource(moduleRef).AsModule().Sync(ctx)
 		if err != nil {
 			return ReviewVerdict{}, "", fmt.Errorf("review: load project module %q: %w", moduleRef, err)
 		}
@@ -94,7 +92,7 @@ func Review(
 		WithPromptFile(promptFile)
 
 	// 4. Apply per-role tool-surface policy (ADR-0024): block gate, bootstrap, container.
-	llm = blockForRole(ctx, llm, projectMod, RoleReviewer)
+	llm = blockForRole(llm, RoleReviewer)
 
 	// 5. Drive the Loop.
 	llm = llm.Loop()

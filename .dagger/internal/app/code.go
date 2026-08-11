@@ -57,10 +57,8 @@ func Code(
 		WithDirectoryOutput("result", "The modified source directory after the agent's work")
 
 	// 2. Optionally load the project module so its functions become LLM tools (ADR-0019).
-	var projectMod *dagger.Module
 	if moduleRef != "" {
-		var err error
-		projectMod, err = client.ModuleSource(moduleRef).AsModule().Sync(ctx)
+		projectMod, err := client.ModuleSource(moduleRef).AsModule().Sync(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("code: load project module %q: %w", moduleRef, err)
 		}
@@ -77,7 +75,7 @@ func Code(
 
 	// 4. Apply per-role tool-surface policy (ADR-0024): block dagmar-bootstrap,
 	// dagmar-gate (deterministic controller steps), keep Container (go build).
-	llm = blockForRole(ctx, llm, projectMod, RoleCoder)
+	llm = blockForRole(llm, RoleCoder)
 
 	// 5. Block on the Loop — the agent works until done or budget exhausted.
 	llm = llm.Loop()
