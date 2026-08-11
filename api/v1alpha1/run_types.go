@@ -105,6 +105,29 @@ type RunStatus struct {
 	// SubRunRefs names the child Runs created by an orchestration Run (ADR-0016 §3).
 	// +optional
 	SubRunRefs []string `json:"subRunRefs,omitempty"`
+
+	// StepResults holds step-by-step results pushed by the CognitionRun pipeline's
+	// Collector (ADR-0027 D3). Each entry is a step result from the pipeline execution:
+	// prompt, code, gate, review, adjudicate. Provides fine-grained visibility for the
+	// controller's policy decisions (retry/escalate/done) and k9s observability.
+	// +optional
+	// +listType=map
+	// +kubebuilder:validation:MaxItems=50
+	StepResults []StepResult `json:"stepResults,omitempty"`
+}
+
+// StepResult is a single pipeline step's result, pushed by the Collector (ADR-0027 D3).
+type StepResult struct {
+	// Step is the pipeline step name: "prompt", "code", "gate", "review", "adjudicate".
+	Step string `json:"step"`
+
+	// Round is the revise-loop round (1-based). 0 for non-loop steps (prompt).
+	// +optional
+	Round int `json:"round,omitempty"`
+
+	// Result is the step's result as a JSON string (gate JSON, review verdict, etc.).
+	// +optional
+	Result string `json:"result,omitempty"`
 }
 
 // +kubebuilder:object:root=true

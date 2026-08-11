@@ -173,6 +173,34 @@ spec:
                   Values: "coding" | "gating" | "reviewing" | "adjudicating" | "escalated" | "done".
                   Zero-valued on atomic Runs.
                 type: string
+              stepResults:
+                description: |-
+                  StepResults holds step-by-step results pushed by the CognitionRun pipeline's
+                  Collector (ADR-0027 D3). Each entry is a step result from the pipeline execution:
+                  prompt, code, gate, review, adjudicate. Provides fine-grained visibility for the
+                  controller's policy decisions (retry/escalate/done) and k9s observability.
+                items:
+                  description: StepResult is a single pipeline step's result, pushed
+                    by the Collector (ADR-0027 D3).
+                  properties:
+                    result:
+                      description: Result is the step's result as a JSON string (gate
+                        JSON, review verdict, etc.).
+                      type: string
+                    round:
+                      description: Round is the revise-loop round (1-based). 0 for
+                        non-loop steps (prompt).
+                      type: integer
+                    step:
+                      description: 'Step is the pipeline step name: "prompt", "code",
+                        "gate", "review", "adjudicate".'
+                      type: string
+                  required:
+                  - step
+                  type: object
+                maxItems: 50
+                type: array
+                x-kubernetes-list-type: map
               subRunRefs:
                 description: SubRunRefs names the child Runs created by an orchestration
                   Run (ADR-0016 §3).

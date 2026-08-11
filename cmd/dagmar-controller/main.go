@@ -56,6 +56,12 @@ func main() {
 		setupFatal(err, "setup RunReconciler")
 	}
 
+	// Collector HTTP server (ADR-0027 D3): receives step-result pushes from the
+	// CognitionRun pipeline's Collector. Runs as a manager Runnable.
+	if err := mgr.Add(&controller.CollectorServer{Client: mgr.GetClient()}); err != nil {
+		setupFatal(err, "setup CollectorServer")
+	}
+
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupFatal(err, "add healthz check")
 	}
